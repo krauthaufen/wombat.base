@@ -107,6 +107,10 @@ export { Quad3d } from "./geometry/quad3d.js";
 export { Polygon2d } from "./geometry/polygon2d.js";
 export { Polygon3d } from "./geometry/polygon3d.js";
 
+// Spatial cells
+export { Cell } from "./cell/cell.js";
+export { Cell2d } from "./cell/cell2d.js";
+
 // Array views (for now, just the float ones — others can wait)
 export { V2fArray } from "./vector/array/v2fArray.js";
 export { V3fArray } from "./vector/array/v3fArray.js";
