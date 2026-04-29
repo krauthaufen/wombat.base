@@ -2,6 +2,7 @@
 
 import { V2d } from "../vector/v2d.js";
 import { Trafo2d } from "../trafo/trafo2d.js";
+import { Box2d } from "../box/box2d.js";
 import { combineHash, hashNumber } from "../internal/hash.js";
 
 export class Circle2d {
@@ -29,6 +30,42 @@ export class Circle2d {
 
   distance(p: V2d): number {
     return Math.abs(p.sub(this.center).length() - this.radius);
+  }
+
+  intersects(other: Circle2d | Box2d): boolean {
+    if (other instanceof Box2d) {
+      const cx = Math.max(other.min.x, Math.min(this.center.x, other.max.x));
+      const cy = Math.max(other.min.y, Math.min(this.center.y, other.max.y));
+      const dx = this.center.x - cx, dy = this.center.y - cy;
+      return dx * dx + dy * dy <= this.radius * this.radius;
+    }
+    const r = this.radius + other.radius;
+    return this.center.sub(other.center).lengthSquared() <= r * r;
+  }
+
+  /**
+   * Circle-circle intersection in 2D:
+   * - Two `V2d` points where the circles cross,
+   * - One `V2d` point for tangency,
+   * - `undefined` for disjoint or one fully inside the other.
+   */
+  intersection(other: Circle2d): V2d | [V2d, V2d] | undefined {
+    const d2v = other.center.sub(this.center);
+    const d2 = d2v.lengthSquared();
+    const d = Math.sqrt(d2);
+    const rSum = this.radius + other.radius;
+    const rDiff = Math.abs(this.radius - other.radius);
+    if (d > rSum) return undefined;
+    if (d < rDiff) return undefined;
+    if (d === 0) return undefined;
+    const a = (d2 + this.radius * this.radius - other.radius * other.radius) / (2 * d);
+    const mid = this.center.add(d2v.mul(a / d));
+    const h2 = this.radius * this.radius - a * a;
+    if (h2 <= 0) return mid;
+    const h = Math.sqrt(h2);
+    // perpendicular in 2D: (-dy, dx) / d
+    const perp = new V2d(-d2v.y / d, d2v.x / d);
+    return [mid.add(perp.mul(h)), mid.sub(perp.mul(h))];
   }
 
   transformed(t: Trafo2d): Circle2d {

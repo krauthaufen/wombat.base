@@ -4,6 +4,8 @@ import { V3d } from "../vector/v3d.js";
 import { Box3d } from "../box/box3d.js";
 import { Trafo3d } from "../trafo/trafo3d.js";
 import { Ray3d } from "./ray3d.js";
+import { Plane3d } from "./plane3d.js";
+import { Circle3d } from "./circle3d.js";
 import { combineHash, hashNumber } from "../internal/hash.js";
 
 export class Sphere3d {
@@ -50,7 +52,7 @@ export class Sphere3d {
     return Math.max(0, p.distance(this.center) - this.radius);
   }
 
-  intersects(other: Sphere3d | Box3d | Ray3d): boolean {
+  intersects(other: Sphere3d | Box3d | Ray3d | Plane3d): boolean {
     if (other instanceof Sphere3d) {
       const r = this.radius + other.radius;
       return this.center.distanceSquared(other.center) <= r * r;
@@ -64,10 +66,65 @@ export class Sphere3d {
       const dx = c.x - cx, dy = c.y - cy, dz = c.z - cz;
       return dx * dx + dy * dy + dz * dz <= this.radius * this.radius;
     }
+    if (other instanceof Plane3d) {
+      return Math.abs(other.signedDistance(this.center)) <= this.radius;
+    }
     // Ray3d
     const hit = other.intersection(this);
     if (!hit) return false;
     return hit.tMax >= 0;
+  }
+
+  /**
+   * Intersection with another sphere or a plane.
+   *
+   * - `Sphere3d`: returns a circle (general case), a single point
+   *   (external tangent — coincident centers excluded), or undefined
+   *   (disjoint or one fully contained in the other).
+   * - `Plane3d`: returns a `Circle3d` for proper intersection, a tangent
+   *   point when the plane just grazes the sphere, or undefined.
+   */
+  intersection(other: Sphere3d):
+    | { kind: "circle"; circle: Circle3d }
+    | { kind: "point"; point: V3d }
+    | undefined;
+  intersection(other: Plane3d): Circle3d | { kind: "tangent"; point: V3d } | undefined;
+  intersection(other: Sphere3d | Plane3d):
+    | { kind: "circle"; circle: Circle3d }
+    | { kind: "point"; point: V3d }
+    | { kind: "tangent"; point: V3d }
+    | Circle3d
+    | undefined {
+    if (other instanceof Sphere3d) {
+      const d2 = this.center.distanceSquared(other.center);
+      const d = Math.sqrt(d2);
+      const rSum = this.radius + other.radius;
+      const rDiff = Math.abs(this.radius - other.radius);
+      if (d > rSum) return undefined;          // disjoint
+      if (d < rDiff) return undefined;         // one inside the other (no intersection curve)
+      if (d === 0) return undefined;           // concentric (rDiff==0 also handled): no curve
+      // Distance from this.center along axis to circle plane.
+      const a = (d2 + this.radius * this.radius - other.radius * other.radius) / (2 * d);
+      const axis = other.center.sub(this.center).mul(1 / d);
+      const center = this.center.add(axis.mul(a));
+      const h2 = this.radius * this.radius - a * a;
+      if (h2 <= 0) {
+        // Tangent — single point (external or internal tangency)
+        return { kind: "point", point: center };
+      }
+      const h = Math.sqrt(h2);
+      return { kind: "circle", circle: new Circle3d(center, h, axis) };
+    }
+    // Plane3d
+    const sd = other.signedDistance(this.center);
+    const abs = Math.abs(sd);
+    if (abs > this.radius) return undefined;
+    const projected = this.center.sub(other.normal.mul(sd));
+    if (abs === this.radius) {
+      return { kind: "tangent", point: projected };
+    }
+    const r = Math.sqrt(this.radius * this.radius - sd * sd);
+    return new Circle3d(projected, r, other.normal);
   }
 
   transformed(t: Trafo3d): Sphere3d {

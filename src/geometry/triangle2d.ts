@@ -57,6 +57,14 @@ export class Triangle2d {
     return !(hasNeg && hasPos);
   }
 
+  /**
+   * Triangle-triangle overlap in 2D via SAT. The 6 separating axes are
+   * the outward normals of each triangle's three edges.
+   */
+  intersects(other: Triangle2d): boolean {
+    return !sat2dSeparates(this, other) && !sat2dSeparates(other, this);
+  }
+
   transformed(t: Trafo2d): Triangle2d {
     return new Triangle2d(t.transformPos(this.p0), t.transformPos(this.p1), t.transformPos(this.p2));
   }
@@ -78,4 +86,28 @@ export class Triangle2d {
   toString(): string {
     return `Triangle2d(${this.p0.toString()}, ${this.p1.toString()}, ${this.p2.toString()})`;
   }
+}
+
+// Returns true if any edge of `a` is a separating axis between `a` and `b`.
+function sat2dSeparates(a: Triangle2d, b: Triangle2d): boolean {
+  const verts: [V2d, V2d, V2d] = [a.p0, a.p1, a.p2];
+  const others: [V2d, V2d, V2d] = [b.p0, b.p1, b.p2];
+  for (let i = 0; i < 3; i++) {
+    const v0 = verts[i]!;
+    const v1 = verts[(i + 1) % 3]!;
+    // edge normal (right-hand): (dy, -dx)
+    const nx = v1.y - v0.y;
+    const ny = -(v1.x - v0.x);
+    let aMin = Infinity, aMax = -Infinity, bMin = Infinity, bMax = -Infinity;
+    for (const v of verts) {
+      const p = v.x * nx + v.y * ny;
+      if (p < aMin) aMin = p; if (p > aMax) aMax = p;
+    }
+    for (const v of others) {
+      const p = v.x * nx + v.y * ny;
+      if (p < bMin) bMin = p; if (p > bMax) bMax = p;
+    }
+    if (aMax < bMin || bMax < aMin) return true;
+  }
+  return false;
 }

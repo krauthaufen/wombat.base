@@ -49,6 +49,51 @@ export class Line2d {
     return ((p.x - this.p0.x) * (-d.y) + (p.y - this.p0.y) * d.x) / len;
   }
 
+  /**
+   * Segment-segment intersection in 2D. Returns:
+   * - `{ point, t1, t2 }` only when both `t1, t2 ∈ [0, 1]`;
+   * - `"parallel"` for non-collinear parallel segments (or strictly
+   *   disjoint collinear ones);
+   * - `"coincident"` for collinear segments that share at least a point;
+   * - `undefined` otherwise (the lines cross outside the segments).
+   */
+  intersection(other: Line2d):
+    | { point: V2d; t1: number; t2: number }
+    | "parallel"
+    | "coincident"
+    | undefined {
+    const d1 = this.direction();
+    const d2 = other.direction();
+    const det = d1.x * d2.y - d1.y * d2.x;
+    const dx = other.p0.x - this.p0.x;
+    const dy = other.p0.y - this.p0.y;
+    if (Math.abs(det) < 1e-30) {
+      // parallel; check collinearity
+      const cross = dx * d1.y - dy * d1.x;
+      if (Math.abs(cross) > 1e-12) return "parallel";
+      // collinear: check projection overlap on this segment
+      const ls = d1.lengthSquared();
+      if (ls === 0) return "coincident";
+      const ta = ((other.p0.x - this.p0.x) * d1.x + (other.p0.y - this.p0.y) * d1.y) / ls;
+      const tb = ((other.p1.x - this.p0.x) * d1.x + (other.p1.y - this.p0.y) * d1.y) / ls;
+      const lo = Math.min(ta, tb), hi = Math.max(ta, tb);
+      if (hi < 0 || lo > 1) return "parallel";
+      return "coincident";
+    }
+    const t1 = (dx * d2.y - dy * d2.x) / det;
+    const t2 = (dx * d1.y - dy * d1.x) / det;
+    if (t1 < 0 || t1 > 1 || t2 < 0 || t2 > 1) return undefined;
+    return { point: new V2d(this.p0.x + d1.x * t1, this.p0.y + d1.y * t1), t1, t2 };
+  }
+
+  /** True iff the closed segments share at least one point. */
+  intersects(other: Line2d): boolean {
+    const r = this.intersection(other);
+    if (r === undefined) return false;
+    if (r === "parallel") return false;
+    return true;
+  }
+
   transformed(t: Trafo2d): Line2d {
     return new Line2d(t.transformPos(this.p0), t.transformPos(this.p1));
   }

@@ -10,6 +10,8 @@
 import { V3d } from "../vector/v3d.js";
 import { Ray3d } from "./ray3d.js";
 import { Line3d } from "./line3d.js";
+import { Triangle3d } from "./triangle3d.js";
+import { Box3d } from "../box/box3d.js";
 import { Trafo3d } from "../trafo/trafo3d.js";
 import { combineHash, hashNumber } from "../internal/hash.js";
 
@@ -52,8 +54,39 @@ export class Plane3d {
     return new Plane3d(this.normal.neg(), -this.distance);
   }
 
-  intersects(ray: Ray3d): boolean {
-    return Math.abs(this.normal.dot(ray.direction)) > 0;
+  intersects(other: Ray3d | Triangle3d | Box3d): boolean {
+    if (other instanceof Triangle3d) {
+      const s0 = this.signedDistance(other.p0);
+      const s1 = this.signedDistance(other.p1);
+      const s2 = this.signedDistance(other.p2);
+      const allPos = s0 > 0 && s1 > 0 && s2 > 0;
+      const allNeg = s0 < 0 && s1 < 0 && s2 < 0;
+      return !(allPos || allNeg);
+    }
+    if (other instanceof Box3d) {
+      return this.classify(other) === "intersecting";
+    }
+    return Math.abs(this.normal.dot(other.direction)) > 0;
+  }
+
+  /**
+   * Classifies an axis-aligned box against this plane:
+   * - `"above"` — box lies strictly on the side the normal points to,
+   * - `"below"` — box lies strictly on the opposite side,
+   * - `"intersecting"` — box straddles or touches the plane.
+   *
+   * Uses the SAT-style projection trick: project the box's half-extents
+   * onto the plane normal and compare to the signed distance of the
+   * box center. Suitable as a building block for frustum culling.
+   */
+  classify(box: Box3d): "above" | "below" | "intersecting" {
+    const c = box.center();
+    const e = box.size().mul(0.5);
+    const r = e.x * Math.abs(this.normal.x) + e.y * Math.abs(this.normal.y) + e.z * Math.abs(this.normal.z);
+    const sd = this.signedDistance(c);
+    if (sd > r) return "above";
+    if (sd < -r) return "below";
+    return "intersecting";
   }
 
   /**
@@ -66,7 +99,49 @@ export class Plane3d {
   intersection(other: Ray3d): { point: V3d; t: number } | undefined;
   intersection(other: Line3d): { point: V3d; t: number } | undefined;
   intersection(other: Plane3d): Ray3d | undefined;
-  intersection(other: Ray3d | Line3d | Plane3d): { point: V3d; t: number } | Ray3d | undefined {
+  intersection(other: Triangle3d): Line3d | { kind: "point"; point: V3d } | undefined;
+  intersection(other: Ray3d | Line3d | Plane3d | Triangle3d):
+    | { point: V3d; t: number }
+    | Ray3d
+    | Line3d
+    | { kind: "point"; point: V3d }
+    | undefined {
+    if (other instanceof Triangle3d) {
+      const s0 = this.signedDistance(other.p0);
+      const s1 = this.signedDistance(other.p1);
+      const s2 = this.signedDistance(other.p2);
+      const allPos = s0 > 0 && s1 > 0 && s2 > 0;
+      const allNeg = s0 < 0 && s1 < 0 && s2 < 0;
+      if (allPos || allNeg) return undefined;
+      // Collect intersection points along edges that straddle the plane,
+      // plus any vertex that lies exactly on the plane.
+      const pts: V3d[] = [];
+      const edge = (a: V3d, sa: number, b: V3d, sb: number): void => {
+        if ((sa > 0 && sb < 0) || (sa < 0 && sb > 0)) {
+          const t = sa / (sa - sb);
+          pts.push(a.add(b.sub(a).mul(t)));
+        }
+      };
+      if (s0 === 0) pts.push(other.p0);
+      if (s1 === 0) pts.push(other.p1);
+      if (s2 === 0) pts.push(other.p2);
+      edge(other.p0, s0, other.p1, s1);
+      edge(other.p1, s1, other.p2, s2);
+      edge(other.p2, s2, other.p0, s0);
+      // Deduplicate near-coincident points (a vertex on the plane plus an
+      // edge endpoint hit will both yield the same coordinate).
+      const uniq: V3d[] = [];
+      for (const p of pts) {
+        let dup = false;
+        for (const q of uniq) {
+          if (p.approxEqual(q, 1e-12)) { dup = true; break; }
+        }
+        if (!dup) uniq.push(p);
+      }
+      if (uniq.length === 0) return undefined;
+      if (uniq.length === 1) return { kind: "point", point: uniq[0]! };
+      return new Line3d(uniq[0]!, uniq[1]!);
+    }
     if (other instanceof Plane3d) {
       const dir = this.normal.cross(other.normal);
       const ls = dir.lengthSquared();
