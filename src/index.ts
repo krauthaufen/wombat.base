@@ -61,6 +61,52 @@ export { Box3f } from "./box/box3f.js";
 export { Box2d } from "./box/box2d.js";
 export { Box3d } from "./box/box3d.js";
 
+// 3D transformations
+export { Shift3d } from "./trafo/shift3d.js";
+export { Scale3d } from "./trafo/scale3d.js";
+export { Euclidean3d } from "./trafo/euclidean3d.js";
+export { Similarity3d } from "./trafo/similarity3d.js";
+export { Affine3d } from "./trafo/affine3d.js";
+export { Trafo3d } from "./trafo/trafo3d.js";
+
+// 2D transformations
+export { Shift2d } from "./trafo/shift2d.js";
+export { Scale2d } from "./trafo/scale2d.js";
+export { Euclidean2d } from "./trafo/euclidean2d.js";
+export { Similarity2d } from "./trafo/similarity2d.js";
+export { Affine2d } from "./trafo/affine2d.js";
+export { Trafo2d } from "./trafo/trafo2d.js";
+
+// Linear algebra
+export {
+  type LU, lu,
+  type QR, qr,
+  cholesky,
+  type SymmetricEigen, symmetricEigen,
+  type SVD, svd,
+  solveLinear, solveLeastSquares,
+} from "./linalg/index.js";
+export {
+  type MatrixViewD,
+  newMatrixView,
+} from "./linalg/matrix-view.js";
+
+// Geometry primitives
+export { Plane3d } from "./geometry/plane3d.js";
+export { Ray2d } from "./geometry/ray2d.js";
+export { Ray3d } from "./geometry/ray3d.js";
+export { Line2d } from "./geometry/line2d.js";
+export { Line3d } from "./geometry/line3d.js";
+export { Triangle2d } from "./geometry/triangle2d.js";
+export { Triangle3d } from "./geometry/triangle3d.js";
+export { Sphere3d } from "./geometry/sphere3d.js";
+export { Circle2d } from "./geometry/circle2d.js";
+export { Circle3d } from "./geometry/circle3d.js";
+export { Quad2d } from "./geometry/quad2d.js";
+export { Quad3d } from "./geometry/quad3d.js";
+export { Polygon2d } from "./geometry/polygon2d.js";
+export { Polygon3d } from "./geometry/polygon3d.js";
+
 // Array views (for now, just the float ones — others can wait)
 export { V2fArray } from "./vector/array/v2fArray.js";
 export { V3fArray } from "./vector/array/v3fArray.js";
