@@ -45,7 +45,7 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "npm run clean && tspc -p tsconfig.build.json",
-    "typecheck": "tspc -p tsconfig.json --noEmit",
+    "typecheck": "node scripts/typecheck.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepare": "ts-patch install -s",

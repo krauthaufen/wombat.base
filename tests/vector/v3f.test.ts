@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { V3f } from "../../src/vector/v3f.js";
+import { V3b } from "../../src/vector/v3b.js";
 
 describe("V3f — construction", () => {
   it("default constructor is zero", () => {
@@ -161,6 +162,29 @@ describe("V3f — equality / hashing / iteration", () => {
   it("Symbol.iterator yields x, y, z", () => {
     const v = new V3f(7, 8, 9);
     expect([...v]).toEqual([7, 8, 9]);
+  });
+});
+
+describe("V3f — component-wise comparison", () => {
+  it("lt returns V3b", () => {
+    const r = new V3f(1, 5, 3).lt(new V3f(2, 2, 4));
+    expect(r).toBeInstanceOf(V3b);
+    expect(r.toArray()).toEqual([true, false, true]);
+  });
+  it("le", () => {
+    expect(new V3f(1, 2, 3).le(new V3f(1, 1, 4)).toArray()).toEqual([true, false, true]);
+  });
+  it("gt", () => {
+    expect(new V3f(1, 2, 3).gt(new V3f(0, 2, 4)).toArray()).toEqual([true, false, false]);
+  });
+  it("ge", () => {
+    expect(new V3f(1, 2, 3).ge(new V3f(1, 3, 3)).toArray()).toEqual([true, false, true]);
+  });
+  it("eq is component-wise (distinct from equals)", () => {
+    expect(new V3f(1, 2, 3).eq(new V3f(1, 0, 3)).toArray()).toEqual([true, false, true]);
+  });
+  it("neq", () => {
+    expect(new V3f(1, 2, 3).neq(new V3f(1, 0, 3)).toArray()).toEqual([false, true, false]);
   });
 });
 
