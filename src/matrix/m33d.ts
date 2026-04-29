@@ -2,6 +2,7 @@
 // See m44f.ts for conventions.
 
 import { combineHash, hashNumber } from "../internal/hash.js";
+import { V2d } from "../vector/v2d.js";
 import { V3d } from "../vector/v3d.js";
 
 const ROWS = 3;
@@ -94,6 +95,46 @@ export class M33d {
     d[6] = t * x * z - s * y;    // M20
     d[7] = t * y * z + s * x;    // M21
     d[8] = t * z * z + c;        // M22
+    return m;
+  }
+
+  // ---------- 2D-homogeneous factories (M33 used as a 2D transform) ----------
+
+  /** Homogeneous 2D translation. */
+  static translation(v: V2d): M33d;
+  static translation(tx: number, ty: number): M33d;
+  static translation(a: V2d | number, b?: number): M33d {
+    const m = M33d.copy(M33d.identity);
+    if (typeof a === "number") { m._data[2] = a; m._data[5] = b!; }
+    else { m._data[2] = a._data[0]!; m._data[5] = a._data[1]!; }
+    return m;
+  }
+
+  /** Homogeneous 2D non-uniform scale. */
+  static scaling(v: V2d): M33d;
+  static scaling(sx: number, sy: number): M33d;
+  static scaling(a: V2d | number, b?: number): M33d {
+    const m = new M33d();
+    if (typeof a === "number") { m._data[0] = a; m._data[4] = b!; }
+    else { m._data[0] = a._data[0]!; m._data[4] = a._data[1]!; }
+    m._data[8] = 1;
+    return m;
+  }
+
+  /** Homogeneous 2D uniform scale. */
+  static scalingUniform(s: number): M33d {
+    const m = new M33d();
+    m._data[0] = s; m._data[4] = s; m._data[8] = 1;
+    return m;
+  }
+
+  /** Homogeneous 2D rotation by `rad`. */
+  static rotation(rad: number): M33d {
+    const c = Math.cos(rad), s = Math.sin(rad);
+    const m = new M33d();
+    m._data[0] = c;  m._data[1] = -s;
+    m._data[3] = s;  m._data[4] = c;
+    m._data[8] = 1;
     return m;
   }
 
@@ -302,5 +343,54 @@ export class M33d {
   static copyInto(from: M33d, target: M33d): M33d {
     target._data.set(from._data);
     return target;
+  }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "+"(a: M33d, b: M33d): M33d { return a.add(b); }
+  static "-"(a: M33d, b: M33d): M33d;
+  static "-"(a: M33d): M33d;
+  static "-"(a: M33d, b?: M33d): M33d { return b ? a.sub(b) : a.neg(); }
+  static "*"(a: M33d, b: M33d): M33d;
+  static "*"(a: M33d, b: V3d): V3d;
+  static "*"(a: M33d, b: number): M33d;
+  static "*"(a: number, b: M33d): M33d;
+  static "*"(a: M33d | number, b: M33d | V3d | number): M33d | V3d {
+    if (typeof a === "number") return (b as M33d).mul(a);
+    return (a as { mul(o: M33d | V3d | number): M33d | V3d }).mul(b);
+  }
+
+  "+="(o: M33d): void {
+    this._data[0]! += o._data[0]!;
+    this._data[1]! += o._data[1]!;
+    this._data[2]! += o._data[2]!;
+    this._data[3]! += o._data[3]!;
+    this._data[4]! += o._data[4]!;
+    this._data[5]! += o._data[5]!;
+    this._data[6]! += o._data[6]!;
+    this._data[7]! += o._data[7]!;
+    this._data[8]! += o._data[8]!;
+  }
+  "-="(o: M33d): void {
+    this._data[0]! -= o._data[0]!;
+    this._data[1]! -= o._data[1]!;
+    this._data[2]! -= o._data[2]!;
+    this._data[3]! -= o._data[3]!;
+    this._data[4]! -= o._data[4]!;
+    this._data[5]! -= o._data[5]!;
+    this._data[6]! -= o._data[6]!;
+    this._data[7]! -= o._data[7]!;
+    this._data[8]! -= o._data[8]!;
+  }
+  "*="(o: number): void {
+    this._data[0]! *= o;
+    this._data[1]! *= o;
+    this._data[2]! *= o;
+    this._data[3]! *= o;
+    this._data[4]! *= o;
+    this._data[5]! *= o;
+    this._data[6]! *= o;
+    this._data[7]! *= o;
+    this._data[8]! *= o;
   }
 }

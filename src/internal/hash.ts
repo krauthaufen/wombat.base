@@ -1,4 +1,4 @@
-// Hash helpers — kept compatible with `@aardworx/adaptive`'s
+// Hash helpers — kept compatible with `@aardworx/wombat.adaptive`'s
 // `defaultHash` (`datastructures/equality.ts`). Numbers are mixed
 // with the same bit-pattern hash; `combine` uses the same FNV-1a
 // prime so a primitive that walks its components and hashes them

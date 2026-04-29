@@ -374,4 +374,56 @@ export class V4i {
     target._data[3] = from._data[3]!;
     return target;
   }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "+"(a: V4i, b: V4i): V4i { return a.add(b); }
+  static "-"(a: V4i, b: V4i): V4i;
+  static "-"(a: V4i): V4i;
+  static "-"(a: V4i, b?: V4i): V4i { return b ? a.sub(b) : a.neg(); }
+  static "*"(a: V4i, b: V4i): V4i;
+  static "*"(a: V4i, b: number): V4i;
+  static "*"(a: number, b: V4i): V4i;
+  static "*"(a: V4i | number, b: V4i | number): V4i {
+    if (typeof a === "number") return (b as V4i).mul(a);
+    return a.mul(b as V4i | number);
+  }
+  static "/"(a: V4i, b: V4i): V4i;
+  static "/"(a: V4i, b: number): V4i;
+  static "/"(a: V4i, b: V4i | number): V4i { return a.div(b); }
+
+  "+="(o: V4i): void {
+    this._data[0]! += o._data[0]!;
+    this._data[1]! += o._data[1]!;
+    this._data[2]! += o._data[2]!;
+    this._data[3]! += o._data[3]!;
+  }
+  "-="(o: V4i): void {
+    this._data[0]! -= o._data[0]!;
+    this._data[1]! -= o._data[1]!;
+    this._data[2]! -= o._data[2]!;
+    this._data[3]! -= o._data[3]!;
+  }
+  "*="(o: V4i): void;
+  "*="(o: number): void;
+  "*="(o: V4i | number): void {
+    if (typeof o === "number") { this._data[0]! *= o; this._data[1]! *= o; this._data[2]! *= o; this._data[3]! *= o; }
+    else {
+    this._data[0]! *= o._data[0]!;
+    this._data[1]! *= o._data[1]!;
+    this._data[2]! *= o._data[2]!;
+    this._data[3]! *= o._data[3]!;
+  }
+  }
+  "/="(o: V4i): void;
+  "/="(o: number): void;
+  "/="(o: V4i | number): void {
+    if (typeof o === "number") { const inv = 1 / o; this._data[0]! *= inv; this._data[1]! *= inv; this._data[2]! *= inv; this._data[3]! *= inv; }
+    else {
+    this._data[0]! /= o._data[0]!;
+    this._data[1]! /= o._data[1]!;
+    this._data[2]! /= o._data[2]!;
+    this._data[3]! /= o._data[3]!;
+  }
+  }
 }

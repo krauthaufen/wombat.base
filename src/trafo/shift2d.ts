@@ -16,7 +16,12 @@ export class Shift2d {
 
   static readonly identity: Shift2d = new Shift2d(V2d.zero);
 
-  static translation(v: V2d): Shift2d { return new Shift2d(v); }
+  static translation(v: V2d): Shift2d;
+  static translation(tx: number, ty: number): Shift2d;
+  static translation(a: V2d | number, b?: number): Shift2d {
+    if (typeof a === "number") return new Shift2d(new V2d(a, b!));
+    return new Shift2d(a);
+  }
 
   get offset(): V2d { return this._offset; }
 
@@ -58,4 +63,8 @@ export class Shift2d {
   toString(): string { return `Shift2d(${this._offset.toString()})`; }
 
   *[Symbol.iterator](): Iterator<number> { yield* this._offset; }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "*"(a: Shift2d, b: Shift2d): Shift2d { return a.mul(b); }
 }

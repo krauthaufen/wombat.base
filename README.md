@@ -1,8 +1,8 @@
-# aardvark-ts
+# wombat.base
 
 A TypeScript port of `Aardvark.Base.Math` and `Aardvark.Base.Geometry`
 — the primitive math types every renderer / CAD pipeline / point-cloud
-tool ends up needing. Published as `@aardworx/aardvark-ts`.
+tool ends up needing. Published as `@aardworx/wombat.base`.
 
 This is a foundation library: pure data types and pure functions. No
 DOM, no WebGL, no adaptive, no JSX. Other packages (`tshade`,
@@ -13,9 +13,9 @@ top.
 
 The TS port of the Aardvark stack progresses bottom-up:
 
-1. [`@aardworx/adaptive`](https://github.com/krauthaufen/adaptive-ts) — incremental computations. ✓
-2. [`@aardworx/adaptive-ui`](https://github.com/krauthaufen/adaptive-ui) — adaptive direct-DOM JSX runtime. ✓
-3. **`@aardworx/aardvark-ts`** — math/geometry primitives. *(this repo)*
+1. [`@aardworx/wombat.adaptive`](https://github.com/krauthaufen/wombat.adaptive) — incremental computations. ✓
+2. [`@aardworx/wombat.adaptive-ui`](https://github.com/krauthaufen/adaptive-ui) — adaptive direct-DOM JSX runtime. ✓
+3. **`@aardworx/wombat.base`** — math/geometry primitives. *(this repo)*
 4. [`tshade`](https://github.com/krauthaufen/tshade) — F#-style shader DSL with composition + cross-stage I/O elimination.
 5. (later) `aardvark-rendering`-equivalent — scene graph, pipelines.
 
@@ -51,7 +51,7 @@ In scope:
   `Ray3d`, `Line3d`, `Triangle3d`, `Sphere3d`, `Polygon2d`/`3d`.
 - Quaternion utilities, rotation conversions, spherical interpolation.
 - Hashing + structural equality for use as `HashMap` keys (compatible
-  with `@aardworx/adaptive`'s `defaultHash`/`defaultEquals`).
+  with `@aardworx/wombat.adaptive`'s `defaultHash`/`defaultEquals`).
 - Deterministic PRNGs and random-vector helpers (XoroShiro128+).
 
 Out of scope, at least for v0.1:

@@ -4,9 +4,12 @@
 import { V2d } from "../vector/v2d.js";
 import { Rot2d } from "../rotation/rot2d.js";
 import { M33d } from "../matrix/m33d.js";
+import { Shift2d } from "./shift2d.js";
 import { combineHash, hashNumber } from "../internal/hash.js";
 import { Euclidean2d } from "./euclidean2d.js";
 import { Trafo2d } from "./trafo2d.js";
+
+const DEG_TO_RAD = Math.PI / 180;
 
 export class Similarity2d {
   static readonly __aardworxMathBrand: "Similarity2d" = "Similarity2d";
@@ -25,6 +28,30 @@ export class Similarity2d {
 
   static fromEuclideanAndScale(e: Euclidean2d, s: number): Similarity2d {
     return new Similarity2d(e, s);
+  }
+
+  static translation(v: V2d): Similarity2d;
+  static translation(tx: number, ty: number): Similarity2d;
+  static translation(shift: Shift2d): Similarity2d;
+  static translation(a: V2d | number | Shift2d, b?: number): Similarity2d {
+    let v: V2d;
+    if (typeof a === "number") v = new V2d(a, b!);
+    else if (a instanceof Shift2d) v = a.offset;
+    else v = a;
+    return new Similarity2d(Euclidean2d.fromTranslation(v), 1);
+  }
+  static rotation(rad: number): Similarity2d;
+  static rotation(r: Rot2d): Similarity2d;
+  static rotation(arg: number | Rot2d): Similarity2d {
+    const r = typeof arg === "number" ? Rot2d.fromRadians(arg) : arg;
+    return new Similarity2d(Euclidean2d.fromRotation(r), 1);
+  }
+  static rotationInDegrees(deg: number): Similarity2d {
+    return Similarity2d.rotation(deg * DEG_TO_RAD);
+  }
+  /** Uniform scaling. */
+  static scaling(s: number): Similarity2d {
+    return new Similarity2d(Euclidean2d.identity, s);
   }
 
   get euclidean(): Euclidean2d { return this._euclidean; }
@@ -101,4 +128,8 @@ export class Similarity2d {
     yield* this._euclidean;
     yield this._scale;
   }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "*"(a: Similarity2d, b: Similarity2d): Similarity2d { return a.mul(b); }
 }

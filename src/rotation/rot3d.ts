@@ -99,6 +99,33 @@ export class Rot3d {
     return new Rot3d(Math.cos(h), ax * s, ay * s, az * s);
   }
 
+  /** Alias for `fromAxisAngle`. */
+  static rotation(axis: V3d, rad: number): Rot3d { return Rot3d.fromAxisAngle(axis, rad); }
+  /** Axis must be normalized; angle in degrees. */
+  static rotationInDegrees(axis: V3d, deg: number): Rot3d {
+    return Rot3d.fromAxisAngle(axis, deg * (Math.PI / 180));
+  }
+  /** Alias for `fromTwoVectors`. */
+  static rotateInto(from: V3d, into: V3d): Rot3d {
+    return Rot3d.fromTwoVectors(from, into);
+  }
+
+  static rotationX(rad: number): Rot3d {
+    const h = rad * 0.5;
+    return new Rot3d(Math.cos(h), Math.sin(h), 0, 0);
+  }
+  static rotationXInDegrees(deg: number): Rot3d { return Rot3d.rotationX(deg * (Math.PI / 180)); }
+  static rotationY(rad: number): Rot3d {
+    const h = rad * 0.5;
+    return new Rot3d(Math.cos(h), 0, Math.sin(h), 0);
+  }
+  static rotationYInDegrees(deg: number): Rot3d { return Rot3d.rotationY(deg * (Math.PI / 180)); }
+  static rotationZ(rad: number): Rot3d {
+    const h = rad * 0.5;
+    return new Rot3d(Math.cos(h), 0, 0, Math.sin(h));
+  }
+  static rotationZInDegrees(deg: number): Rot3d { return Rot3d.rotationZ(deg * (Math.PI / 180)); }
+
   /**
    * Builds `R(order[0])(roll) * R(order[1])(pitch) * R(order[2])(yaw)`.
    * I.e. parameters are consumed left-to-right and multiplied
@@ -552,5 +579,19 @@ export class Rot3d {
     target._data[2] = from._data[2]!;
     target._data[3] = from._data[3]!;
     return target;
+  }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "*"(a: Rot3d, b: Rot3d): Rot3d;
+  static "*"(a: Rot3d, v: V3d): V3d;
+  static "*"(a: Rot3d, b: M44d): M44d;
+  static "*"(
+    a: Rot3d,
+    b: Rot3d | V3d | M44d,
+  ): Rot3d | V3d | M44d {
+    if (b instanceof Rot3d) return a.mul(b);
+    if (b instanceof V3d) return a.transform(b);
+    return a.toMatrixHomogeneous().mul(b);
   }
 }

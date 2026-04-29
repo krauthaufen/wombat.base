@@ -38,6 +38,8 @@ export class Rot2d {
 
   static fromRadians(rad: number): Rot2d { return new Rot2d(rad); }
   static fromDegrees(deg: number): Rot2d { return new Rot2d(deg * (Math.PI / 180)); }
+  /** Alias for `fromRadians`. */
+  static rotation(rad: number): Rot2d { return new Rot2d(rad); }
 
   // ---------- component access ----------
 
@@ -157,5 +159,9 @@ export class Rot2d {
     target._data[0] = from._data[0]!;
     return target;
   }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "*"(a: Rot2d, b: Rot2d): Rot2d { return a.mul(b); }
 }
 

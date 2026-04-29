@@ -85,6 +85,31 @@ export class Rot3f {
     return new Rot3f(Math.cos(h), ax * s, ay * s, az * s);
   }
 
+  /** Alias for `fromAxisAngle`. */
+  static rotation(axis: V3f, rad: number): Rot3f { return Rot3f.fromAxisAngle(axis, rad); }
+  static rotationInDegrees(axis: V3f, deg: number): Rot3f {
+    return Rot3f.fromAxisAngle(axis, deg * (Math.PI / 180));
+  }
+  static rotateInto(from: V3f, into: V3f): Rot3f {
+    return Rot3f.fromTwoVectors(from, into);
+  }
+
+  static rotationX(rad: number): Rot3f {
+    const h = rad * 0.5;
+    return new Rot3f(Math.cos(h), Math.sin(h), 0, 0);
+  }
+  static rotationXInDegrees(deg: number): Rot3f { return Rot3f.rotationX(deg * (Math.PI / 180)); }
+  static rotationY(rad: number): Rot3f {
+    const h = rad * 0.5;
+    return new Rot3f(Math.cos(h), 0, Math.sin(h), 0);
+  }
+  static rotationYInDegrees(deg: number): Rot3f { return Rot3f.rotationY(deg * (Math.PI / 180)); }
+  static rotationZ(rad: number): Rot3f {
+    const h = rad * 0.5;
+    return new Rot3f(Math.cos(h), 0, 0, Math.sin(h));
+  }
+  static rotationZInDegrees(deg: number): Rot3f { return Rot3f.rotationZ(deg * (Math.PI / 180)); }
+
   static fromEuler(roll: number, pitch: number, yaw: number, order: EulerOrder = "xyz"): Rot3f {
     const a0 = AXIS_INDEX[order[0]!]!;
     const a1 = AXIS_INDEX[order[1]!]!;
@@ -483,4 +508,8 @@ export class Rot3f {
     target._data[3] = from._data[3]!;
     return target;
   }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "*"(a: Rot3f, b: Rot3f): Rot3f { return a.mul(b); }
 }

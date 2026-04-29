@@ -1,18 +1,19 @@
 {
-  "name": "@aardworx/aardvark-ts",
+  "name": "@aardworx/wombat.base",
   "version": "0.1.0",
-  "description": "TypeScript port of Aardvark.Base's math and geometry primitives — vectors, matrices, quaternions, transformations, bounding boxes, and packed array views, with TypedArray-backed precision.",
+  "description": "Math and geometry primitives for the Wombat TypeScript stack — vectors, matrices, quaternions, transformations, bounding boxes, and packed array views, with TypedArray-backed precision. Port of F# Aardvark.Base.",
   "license": "MIT",
   "author": "krauthaufen",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/krauthaufen/aardvark-ts.git"
+    "url": "git+https://github.com/krauthaufen/wombat.base.git"
   },
-  "homepage": "https://github.com/krauthaufen/aardvark-ts",
+  "homepage": "https://github.com/krauthaufen/wombat.base",
   "publishConfig": {
     "access": "public"
   },
   "keywords": [
+    "wombat",
     "aardvark",
     "math",
     "geometry",
@@ -53,9 +54,11 @@
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
-    "@aardworx/aardvark-operators": "^0.4.1",
-    "@aardworx/aardvark-operators-tsserver": "^0.3.1",
+    "@boperators/plugin-ts-language-server": "^0.3.2",
+    "@boperators/plugin-tsc": "^0.3.2",
+    "@boperators/plugin-vite": "^0.3.2",
     "@types/node": "^20.11.0",
+    "boperators": "^0.3.2",
     "ts-patch": "^3.1.2",
     "typescript": "^5.4.0",
     "vitest": "^1.4.0"

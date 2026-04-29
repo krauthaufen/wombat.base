@@ -377,6 +377,63 @@ export class V3f {
     return `V3f(${this._data[0]}, ${this._data[1]}, ${this._data[2]})`;
   }
 
+  // ---------- operator overloads (boperators) ----------
+
+  static "+"(a: V3f, b: V3f): V3f { return a.add(b); }
+  static "-"(a: V3f, b: V3f): V3f;
+  static "-"(a: V3f): V3f;
+  static "-"(a: V3f, b?: V3f): V3f { return b ? a.sub(b) : a.neg(); }
+  static "*"(a: V3f, b: V3f): V3f;
+  static "*"(a: V3f, b: number): V3f;
+  static "*"(a: number, b: V3f): V3f;
+  static "*"(a: V3f | number, b: V3f | number): V3f {
+    if (typeof a === "number") return (b as V3f).mul(a);
+    return a.mul(b as V3f | number);
+  }
+  static "/"(a: V3f, b: V3f): V3f;
+  static "/"(a: V3f, b: number): V3f;
+  static "/"(a: V3f, b: V3f | number): V3f { return a.div(b); }
+
+  // Compound-assignment forms: boperators dispatches `v += w` to v["+="](w),
+  // which must mutate `this` in place (the result of the call is discarded).
+  "+="(o: V3f): void {
+    this._data[0]! += o._data[0]!;
+    this._data[1]! += o._data[1]!;
+    this._data[2]! += o._data[2]!;
+  }
+  "-="(o: V3f): void {
+    this._data[0]! -= o._data[0]!;
+    this._data[1]! -= o._data[1]!;
+    this._data[2]! -= o._data[2]!;
+  }
+  "*="(o: V3f): void;
+  "*="(o: number): void;
+  "*="(o: V3f | number): void {
+    if (typeof o === "number") {
+      this._data[0]! *= o;
+      this._data[1]! *= o;
+      this._data[2]! *= o;
+    } else {
+      this._data[0]! *= o._data[0]!;
+      this._data[1]! *= o._data[1]!;
+      this._data[2]! *= o._data[2]!;
+    }
+  }
+  "/="(o: V3f): void;
+  "/="(o: number): void;
+  "/="(o: V3f | number): void {
+    if (typeof o === "number") {
+      const inv = 1 / o;
+      this._data[0]! *= inv;
+      this._data[1]! *= inv;
+      this._data[2]! *= inv;
+    } else {
+      this._data[0]! /= o._data[0]!;
+      this._data[1]! /= o._data[1]!;
+      this._data[2]! /= o._data[2]!;
+    }
+  }
+
   *[Symbol.iterator](): Iterator<number> {
     yield this._data[0]!;
     yield this._data[1]!;

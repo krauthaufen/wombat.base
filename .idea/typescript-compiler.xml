@@ -3,5 +3,6 @@
   <component name="TypeScriptCompiler">
     <option name="versionType" value="SERVICE_DIRECTORY" />
     <option name="typeScriptServiceDirectory" value="$PROJECT_DIR$/node_modules/typescript" />
+    <option name="useTypesFromServer" value="true" />
   </component>
 </project>

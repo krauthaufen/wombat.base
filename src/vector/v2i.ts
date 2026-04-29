@@ -211,4 +211,48 @@ export class V2i {
     target._data[1] = from._data[1]!;
     return target;
   }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "+"(a: V2i, b: V2i): V2i { return a.add(b); }
+  static "-"(a: V2i, b: V2i): V2i;
+  static "-"(a: V2i): V2i;
+  static "-"(a: V2i, b?: V2i): V2i { return b ? a.sub(b) : a.neg(); }
+  static "*"(a: V2i, b: V2i): V2i;
+  static "*"(a: V2i, b: number): V2i;
+  static "*"(a: number, b: V2i): V2i;
+  static "*"(a: V2i | number, b: V2i | number): V2i {
+    if (typeof a === "number") return (b as V2i).mul(a);
+    return a.mul(b as V2i | number);
+  }
+  static "/"(a: V2i, b: V2i): V2i;
+  static "/"(a: V2i, b: number): V2i;
+  static "/"(a: V2i, b: V2i | number): V2i { return a.div(b); }
+
+  "+="(o: V2i): void {
+    this._data[0]! += o._data[0]!;
+    this._data[1]! += o._data[1]!;
+  }
+  "-="(o: V2i): void {
+    this._data[0]! -= o._data[0]!;
+    this._data[1]! -= o._data[1]!;
+  }
+  "*="(o: V2i): void;
+  "*="(o: number): void;
+  "*="(o: V2i | number): void {
+    if (typeof o === "number") { this._data[0]! *= o; this._data[1]! *= o; }
+    else {
+    this._data[0]! *= o._data[0]!;
+    this._data[1]! *= o._data[1]!;
+  }
+  }
+  "/="(o: V2i): void;
+  "/="(o: number): void;
+  "/="(o: V2i | number): void {
+    if (typeof o === "number") { const inv = 1 / o; this._data[0]! *= inv; this._data[1]! *= inv; }
+    else {
+    this._data[0]! /= o._data[0]!;
+    this._data[1]! /= o._data[1]!;
+  }
+  }
 }

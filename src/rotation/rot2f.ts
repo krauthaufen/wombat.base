@@ -38,6 +38,8 @@ export class Rot2f {
 
   static fromRadians(rad: number): Rot2f { return new Rot2f(rad); }
   static fromDegrees(deg: number): Rot2f { return new Rot2f(deg * (Math.PI / 180)); }
+  /** Alias for `fromRadians`. */
+  static rotation(rad: number): Rot2f { return new Rot2f(rad); }
 
   // ---------- component access (rounds to f32 on write) ----------
 
@@ -148,4 +150,8 @@ export class Rot2f {
     target._data[0] = from._data[0]!;
     return target;
   }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "*"(a: Rot2f, b: Rot2f): Rot2f { return a.mul(b); }
 }

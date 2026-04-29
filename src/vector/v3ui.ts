@@ -364,4 +364,50 @@ export class V3ui {
     target._data[2] = from._data[2]!;
     return target;
   }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "+"(a: V3ui, b: V3ui): V3ui { return a.add(b); }
+  static "-"(a: V3ui, b: V3ui): V3ui { return a.sub(b); }
+  static "*"(a: V3ui, b: V3ui): V3ui;
+  static "*"(a: V3ui, b: number): V3ui;
+  static "*"(a: number, b: V3ui): V3ui;
+  static "*"(a: V3ui | number, b: V3ui | number): V3ui {
+    if (typeof a === "number") return (b as V3ui).mul(a);
+    return a.mul(b as V3ui | number);
+  }
+  static "/"(a: V3ui, b: V3ui): V3ui;
+  static "/"(a: V3ui, b: number): V3ui;
+  static "/"(a: V3ui, b: V3ui | number): V3ui { return a.div(b); }
+
+  "+="(o: V3ui): void {
+    this._data[0]! += o._data[0]!;
+    this._data[1]! += o._data[1]!;
+    this._data[2]! += o._data[2]!;
+  }
+  "-="(o: V3ui): void {
+    this._data[0]! -= o._data[0]!;
+    this._data[1]! -= o._data[1]!;
+    this._data[2]! -= o._data[2]!;
+  }
+  "*="(o: V3ui): void;
+  "*="(o: number): void;
+  "*="(o: V3ui | number): void {
+    if (typeof o === "number") { this._data[0]! *= o; this._data[1]! *= o; this._data[2]! *= o; }
+    else {
+    this._data[0]! *= o._data[0]!;
+    this._data[1]! *= o._data[1]!;
+    this._data[2]! *= o._data[2]!;
+  }
+  }
+  "/="(o: V3ui): void;
+  "/="(o: number): void;
+  "/="(o: V3ui | number): void {
+    if (typeof o === "number") { const inv = 1 / o; this._data[0]! *= inv; this._data[1]! *= inv; this._data[2]! *= inv; }
+    else {
+    this._data[0]! /= o._data[0]!;
+    this._data[1]! /= o._data[1]!;
+    this._data[2]! /= o._data[2]!;
+  }
+  }
 }

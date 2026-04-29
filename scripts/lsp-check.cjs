@@ -50,7 +50,7 @@ const proxy = pluginFactory.create({
   config: {},
   project: {
     projectService: {},
-    getProjectName: () => "aardvark-ts",
+    getProjectName: () => "wombat.base",
     getCompilerOptions: () => COMPILER_OPTIONS,
   },
   serverHost: ts.sys,

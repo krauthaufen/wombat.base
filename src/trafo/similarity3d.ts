@@ -6,11 +6,15 @@
 // form, though we store the components rather than the matrix.
 
 import { V3d } from "../vector/v3d.js";
+import { V4d } from "../vector/v4d.js";
 import { Rot3d } from "../rotation/rot3d.js";
 import { M44d } from "../matrix/m44d.js";
+import { Shift3d } from "./shift3d.js";
 import { combineHash, hashNumber } from "../internal/hash.js";
 import { Euclidean3d } from "./euclidean3d.js";
 import { Trafo3d } from "./trafo3d.js";
+
+const DEG_TO_RAD = Math.PI / 180;
 
 export class Similarity3d {
   static readonly __aardworxMathBrand: "Similarity3d" = "Similarity3d";
@@ -25,10 +29,55 @@ export class Similarity3d {
     this._scale = scale;
   }
 
-  static readonly identity: Similarity3d = new Similarity3d(Euclidean3d.identity, 1);
+  // Lazy initialiser — resolved on first access so the field doesn't trigger
+  // a cycle if Euclidean3d is still mid-load when this module evaluates.
+  private static _identity: Similarity3d | undefined;
+  static get identity(): Similarity3d {
+    return Similarity3d._identity ??= new Similarity3d(Euclidean3d.identity, 1);
+  }
 
   static fromEuclideanAndScale(e: Euclidean3d, s: number): Similarity3d {
     return new Similarity3d(e, s);
+  }
+
+  static translation(v: V3d): Similarity3d;
+  static translation(tx: number, ty: number, tz: number): Similarity3d;
+  static translation(shift: Shift3d): Similarity3d;
+  static translation(a: V3d | number | Shift3d, b?: number, c?: number): Similarity3d {
+    let v: V3d;
+    if (typeof a === "number") v = new V3d(a, b!, c!);
+    else if (a instanceof Shift3d) v = a.offset;
+    else v = a;
+    return new Similarity3d(Euclidean3d.fromTranslation(v), 1);
+  }
+
+  static rotation(axis: V3d, rad: number): Similarity3d;
+  static rotation(rot: Rot3d): Similarity3d;
+  static rotation(a: V3d | Rot3d, rad?: number): Similarity3d {
+    if (a instanceof Rot3d) return new Similarity3d(Euclidean3d.fromRotation(a), 1);
+    return new Similarity3d(Euclidean3d.fromRotation(Rot3d.fromAxisAngle(a, rad!)), 1);
+  }
+  static rotationInDegrees(axis: V3d, deg: number): Similarity3d {
+    return Similarity3d.rotation(axis, deg * DEG_TO_RAD);
+  }
+  static rotationX(rad: number): Similarity3d {
+    return new Similarity3d(Euclidean3d.rotationX(rad), 1);
+  }
+  static rotationXInDegrees(deg: number): Similarity3d { return Similarity3d.rotationX(deg * DEG_TO_RAD); }
+  static rotationY(rad: number): Similarity3d {
+    return new Similarity3d(Euclidean3d.rotationY(rad), 1);
+  }
+  static rotationYInDegrees(deg: number): Similarity3d { return Similarity3d.rotationY(deg * DEG_TO_RAD); }
+  static rotationZ(rad: number): Similarity3d {
+    return new Similarity3d(Euclidean3d.rotationZ(rad), 1);
+  }
+  static rotationZInDegrees(deg: number): Similarity3d { return Similarity3d.rotationZ(deg * DEG_TO_RAD); }
+  static rotateInto(from: V3d, into: V3d): Similarity3d {
+    return Similarity3d.rotation(Rot3d.fromTwoVectors(from, into));
+  }
+  /** Uniform scaling. (Similarity is uniform-scale by definition.) */
+  static scaling(s: number): Similarity3d {
+    return new Similarity3d(Euclidean3d.identity, s);
   }
 
   get euclidean(): Euclidean3d { return this._euclidean; }
@@ -122,5 +171,49 @@ export class Similarity3d {
   *[Symbol.iterator](): Iterator<number> {
     yield* this._euclidean;
     yield this._scale;
+  }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "*"(a: Similarity3d, b: Similarity3d): Similarity3d;
+  static "*"(a: Similarity3d, b: M44d): M44d;
+  static "*"(a: Similarity3d, v: V4d): V4d;
+  static "*"(a: Similarity3d, b: Rot3d): Similarity3d;
+  static "*"(a: Rot3d, b: Similarity3d): Similarity3d;
+  static "*"(a: Similarity3d, b: Shift3d): Similarity3d;
+  static "*"(a: Shift3d, b: Similarity3d): Similarity3d;
+  static "*"(a: Similarity3d, b: Euclidean3d): Similarity3d;
+  static "*"(a: Euclidean3d, b: Similarity3d): Similarity3d;
+  static "*"(
+    a: Similarity3d | Rot3d | Shift3d | Euclidean3d,
+    b: Similarity3d | M44d | V4d | Rot3d | Shift3d | Euclidean3d,
+  ): Similarity3d | M44d | V4d {
+    if (a instanceof Similarity3d) {
+      if (b instanceof Similarity3d) return a.mul(b);
+      if (b instanceof M44d) return a.toMatrix().mul(b);
+      if (b instanceof V4d) return a.toMatrix().mul(b);
+      if (b instanceof Rot3d) {
+        return new Similarity3d(new Euclidean3d(a.rot.mul(b), a.trans), a.scale);
+      }
+      if (b instanceof Shift3d) {
+        const scaledOffset = b.offset.mul(a.scale);
+        const newEuc = new Euclidean3d(a.rot, a.rot.transform(scaledOffset).add(a.trans));
+        return new Similarity3d(newEuc, a.scale);
+      }
+      if (b instanceof Euclidean3d) {
+        return a.mul(new Similarity3d(b, 1));
+      }
+    }
+    const s = b as Similarity3d;
+    if (a instanceof Rot3d) {
+      return new Similarity3d(new Euclidean3d(a.mul(s.rot), a.transform(s.trans)), s.scale);
+    }
+    if (a instanceof Shift3d) {
+      return new Similarity3d(new Euclidean3d(s.rot, s.trans.add(a.offset)), s.scale);
+    }
+    if (a instanceof Euclidean3d) {
+      return new Similarity3d(a, 1).mul(s);
+    }
+    throw new Error("Similarity3d.*: unreachable");
   }
 }

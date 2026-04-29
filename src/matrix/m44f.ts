@@ -10,6 +10,7 @@
 import { combineHash, hashNumber } from "../internal/hash.js";
 import { V3f } from "../vector/v3f.js";
 import { V4f } from "../vector/v4f.js";
+import { M33f } from "./m33f.js";
 
 const F32_BYTES = 4;
 const ROWS = 4;
@@ -95,19 +96,27 @@ export class M44f {
 
   // ---------- geometric construction ----------
 
-  static translation(v: V3f): M44f {
+  static translation(v: V3f): M44f;
+  static translation(tx: number, ty: number, tz: number): M44f;
+  static translation(a: V3f | number, b?: number, c?: number): M44f {
     const m = M44f.copy(M44f.identity);
-    m._data[3]  = v._data[0]!;  // M03
-    m._data[7]  = v._data[1]!;  // M13
-    m._data[11] = v._data[2]!;  // M23
+    if (typeof a === "number") {
+      m._data[3] = a; m._data[7] = b!; m._data[11] = c!;
+    } else {
+      m._data[3] = a._data[0]!; m._data[7] = a._data[1]!; m._data[11] = a._data[2]!;
+    }
     return m;
   }
 
-  static scaling(v: V3f): M44f {
+  static scaling(v: V3f): M44f;
+  static scaling(sx: number, sy: number, sz: number): M44f;
+  static scaling(a: V3f | number, b?: number, c?: number): M44f {
     const m = new M44f();
-    m._data[0]  = v._data[0]!;
-    m._data[5]  = v._data[1]!;
-    m._data[10] = v._data[2]!;
+    if (typeof a === "number") {
+      m._data[0] = a; m._data[5] = b!; m._data[10] = c!;
+    } else {
+      m._data[0] = a._data[0]!; m._data[5] = a._data[1]!; m._data[10] = a._data[2]!;
+    }
     m._data[15] = 1;
     return m;
   }
@@ -115,6 +124,25 @@ export class M44f {
   static scalingUniform(s: number): M44f {
     const m = new M44f();
     m._data[0] = s; m._data[5] = s; m._data[10] = s; m._data[15] = 1;
+    return m;
+  }
+
+  /** Shear along the x-axis: x' = x + factorY*y + factorZ*z. */
+  static shearYZ(factorY: number, factorZ: number): M44f {
+    const m = M44f.copy(M44f.identity);
+    m._data[1] = factorY; m._data[2] = factorZ;
+    return m;
+  }
+  /** Shear along the y-axis: y' = y + factorX*x + factorZ*z. */
+  static shearXZ(factorX: number, factorZ: number): M44f {
+    const m = M44f.copy(M44f.identity);
+    m._data[4] = factorX; m._data[6] = factorZ;
+    return m;
+  }
+  /** Shear along the z-axis: z' = z + factorX*x + factorY*y. */
+  static shearXY(factorX: number, factorY: number): M44f {
+    const m = M44f.copy(M44f.identity);
+    m._data[8] = factorX; m._data[9] = factorY;
     return m;
   }
 
@@ -155,6 +183,22 @@ export class M44f {
     m._data[10] = 1;
     m._data[15] = 1;
     return m;
+  }
+
+  /** Rotation around an arbitrary axis (Rodrigues), embedded in a 4x4. */
+  static rotation(axis: V3f, rad: number): M44f {
+    const m3 = M33f.fromRotationAxisAngle(axis, rad);
+    const m = new M44f();
+    m._data[0]  = m3._data[0]!; m._data[1]  = m3._data[1]!; m._data[2]  = m3._data[2]!;
+    m._data[4]  = m3._data[3]!; m._data[5]  = m3._data[4]!; m._data[6]  = m3._data[5]!;
+    m._data[8]  = m3._data[6]!; m._data[9]  = m3._data[7]!; m._data[10] = m3._data[8]!;
+    m._data[15] = 1;
+    return m;
+  }
+
+  /** Rotation from yaw/pitch/roll (Z·Y·X intrinsic). */
+  static rotationEuler(yaw: number, pitch: number, roll: number): M44f {
+    return M44f.rotationZ(yaw).mul(M44f.rotationY(pitch)).mul(M44f.rotationX(roll));
   }
 
   // ---------- element accessors (row-major: index = r*4 + c) ----------
@@ -480,5 +524,75 @@ export class M44f {
     target._data[1] = a[4]! * x + a[5]! * y + a[6]!  * z;
     target._data[2] = a[8]! * x + a[9]! * y + a[10]! * z;
     return target;
+  }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "+"(a: M44f, b: M44f): M44f { return a.add(b); }
+  static "-"(a: M44f, b: M44f): M44f;
+  static "-"(a: M44f): M44f;
+  static "-"(a: M44f, b?: M44f): M44f { return b ? a.sub(b) : a.neg(); }
+  static "*"(a: M44f, b: M44f): M44f;
+  static "*"(a: M44f, b: V4f): V4f;
+  static "*"(a: M44f, b: number): M44f;
+  static "*"(a: number, b: M44f): M44f;
+  static "*"(a: M44f | number, b: M44f | V4f | number): M44f | V4f {
+    if (typeof a === "number") return (b as M44f).mul(a);
+    return (a as { mul(o: M44f | V4f | number): M44f | V4f }).mul(b);
+  }
+
+  "+="(o: M44f): void {
+    this._data[0]! += o._data[0]!;
+    this._data[1]! += o._data[1]!;
+    this._data[2]! += o._data[2]!;
+    this._data[3]! += o._data[3]!;
+    this._data[4]! += o._data[4]!;
+    this._data[5]! += o._data[5]!;
+    this._data[6]! += o._data[6]!;
+    this._data[7]! += o._data[7]!;
+    this._data[8]! += o._data[8]!;
+    this._data[9]! += o._data[9]!;
+    this._data[10]! += o._data[10]!;
+    this._data[11]! += o._data[11]!;
+    this._data[12]! += o._data[12]!;
+    this._data[13]! += o._data[13]!;
+    this._data[14]! += o._data[14]!;
+    this._data[15]! += o._data[15]!;
+  }
+  "-="(o: M44f): void {
+    this._data[0]! -= o._data[0]!;
+    this._data[1]! -= o._data[1]!;
+    this._data[2]! -= o._data[2]!;
+    this._data[3]! -= o._data[3]!;
+    this._data[4]! -= o._data[4]!;
+    this._data[5]! -= o._data[5]!;
+    this._data[6]! -= o._data[6]!;
+    this._data[7]! -= o._data[7]!;
+    this._data[8]! -= o._data[8]!;
+    this._data[9]! -= o._data[9]!;
+    this._data[10]! -= o._data[10]!;
+    this._data[11]! -= o._data[11]!;
+    this._data[12]! -= o._data[12]!;
+    this._data[13]! -= o._data[13]!;
+    this._data[14]! -= o._data[14]!;
+    this._data[15]! -= o._data[15]!;
+  }
+  "*="(o: number): void {
+    this._data[0]! *= o;
+    this._data[1]! *= o;
+    this._data[2]! *= o;
+    this._data[3]! *= o;
+    this._data[4]! *= o;
+    this._data[5]! *= o;
+    this._data[6]! *= o;
+    this._data[7]! *= o;
+    this._data[8]! *= o;
+    this._data[9]! *= o;
+    this._data[10]! *= o;
+    this._data[11]! *= o;
+    this._data[12]! *= o;
+    this._data[13]! *= o;
+    this._data[14]! *= o;
+    this._data[15]! *= o;
   }
 }

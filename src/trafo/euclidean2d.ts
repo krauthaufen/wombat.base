@@ -4,8 +4,11 @@
 import { V2d } from "../vector/v2d.js";
 import { Rot2d } from "../rotation/rot2d.js";
 import { M33d } from "../matrix/m33d.js";
+import { Shift2d } from "./shift2d.js";
 import { combineHash } from "../internal/hash.js";
 import { Trafo2d } from "./trafo2d.js";
+
+const DEG_TO_RAD = Math.PI / 180;
 
 export class Euclidean2d {
   static readonly __aardworxMathBrand: "Euclidean2d" = "Euclidean2d";
@@ -26,6 +29,26 @@ export class Euclidean2d {
   static fromTranslation(t: V2d): Euclidean2d { return new Euclidean2d(Rot2d.identity, t); }
   static fromRotationAndTranslation(r: Rot2d, t: V2d): Euclidean2d {
     return new Euclidean2d(r, t);
+  }
+  static translation(v: V2d): Euclidean2d;
+  static translation(tx: number, ty: number): Euclidean2d;
+  static translation(shift: Shift2d): Euclidean2d;
+  static translation(a: V2d | number | Shift2d, b?: number): Euclidean2d {
+    let v: V2d;
+    if (typeof a === "number") v = new V2d(a, b!);
+    else if (a instanceof Shift2d) v = a.offset;
+    else v = a;
+    return new Euclidean2d(Rot2d.identity, v);
+  }
+
+  static rotation(rad: number): Euclidean2d;
+  static rotation(r: Rot2d): Euclidean2d;
+  static rotation(arg: number | Rot2d): Euclidean2d {
+    const r = typeof arg === "number" ? Rot2d.fromRadians(arg) : arg;
+    return new Euclidean2d(r, V2d.zero);
+  }
+  static rotationInDegrees(deg: number): Euclidean2d {
+    return Euclidean2d.rotation(deg * DEG_TO_RAD);
   }
 
   get rot(): Rot2d { return this._rot; }
@@ -87,4 +110,8 @@ export class Euclidean2d {
     yield* this._rot;
     yield* this._trans;
   }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "*"(a: Euclidean2d, b: Euclidean2d): Euclidean2d { return a.mul(b); }
 }

@@ -9,7 +9,12 @@
 import { V2d } from "../vector/v2d.js";
 import { V3d } from "../vector/v3d.js";
 import { M33d } from "../matrix/m33d.js";
+import { Rot2d } from "../rotation/rot2d.js";
+import { Shift2d } from "./shift2d.js";
+import { Scale2d } from "./scale2d.js";
 import { combineHash } from "../internal/hash.js";
+
+const DEG_TO_RAD = Math.PI / 180;
 
 function transformPos2(m: M33d, p: V2d): V2d {
   const a = m._data;
@@ -51,6 +56,84 @@ export class Trafo2d {
     t._forward = M33d.copy(forward);
     t._backward = M33d.copy(backward);
     return t as Trafo2d;
+  }
+
+  // ---------- translation ----------
+
+  static translation(v: V2d): Trafo2d;
+  static translation(tx: number, ty: number): Trafo2d;
+  static translation(shift: Shift2d): Trafo2d;
+  static translation(a: V2d | number | Shift2d, b?: number): Trafo2d {
+    let v: V2d;
+    if (typeof a === "number") v = new V2d(a, b!);
+    else if (a instanceof Shift2d) v = a.offset;
+    else v = a;
+    return Trafo2d.fromMatrices(M33d.translation(v), M33d.translation(v.neg()));
+  }
+
+  // ---------- scaling ----------
+
+  static scaling(v: V2d): Trafo2d;
+  static scaling(sx: number, sy: number): Trafo2d;
+  static scaling(s: number): Trafo2d;
+  static scaling(scale: Scale2d): Trafo2d;
+  static scaling(a: V2d | number | Scale2d, b?: number): Trafo2d {
+    if (typeof a === "number") {
+      if (b === undefined) {
+        return Trafo2d.fromMatrices(M33d.scalingUniform(a), M33d.scalingUniform(1 / a));
+      }
+      return Trafo2d.fromMatrices(M33d.scaling(a, b), M33d.scaling(1 / a, 1 / b));
+    }
+    const v = a instanceof Scale2d ? a.scale : a;
+    return Trafo2d.fromMatrices(
+      M33d.scaling(v),
+      M33d.scaling(new V2d(1 / v.x, 1 / v.y)),
+    );
+  }
+
+  // ---------- rotation ----------
+
+  static rotation(rad: number): Trafo2d;
+  static rotation(r: Rot2d): Trafo2d;
+  static rotation(a: number | Rot2d): Trafo2d {
+    const rad = typeof a === "number" ? a : a.radians;
+    return Trafo2d.fromMatrices(M33d.rotation(rad), M33d.rotation(-rad));
+  }
+  static rotationInDegrees(deg: number): Trafo2d {
+    return Trafo2d.rotation(deg * DEG_TO_RAD);
+  }
+
+  // ---------- frame / basis ----------
+
+  /** Trafo whose forward maps `(0,0) → origin` and the standard basis to `(xAxis, yAxis)`. */
+  static fromBasis(xAxis: V2d, yAxis: V2d, origin: V2d): Trafo2d {
+    const fwd = M33d.fromArray([
+      xAxis.x, yAxis.x, origin.x,
+      xAxis.y, yAxis.y, origin.y,
+      0, 0, 1,
+    ]);
+    return Trafo2d.fromMatrix(fwd);
+  }
+
+  static fromOrthoNormalBasis(xAxis: V2d, yAxis: V2d): Trafo2d {
+    const fwd = M33d.fromArray([
+      xAxis.x, yAxis.x, 0,
+      xAxis.y, yAxis.y, 0,
+      0, 0, 1,
+    ]);
+    const bwd = M33d.fromArray([
+      xAxis.x, xAxis.y, 0,
+      yAxis.x, yAxis.y, 0,
+      0, 0, 1,
+    ]);
+    return Trafo2d.fromMatrices(fwd, bwd);
+  }
+
+  /** Builds Scale * Rotation * Translation, in that order. */
+  static fromComponents(scale: V2d, rotationRad: number, translation: V2d): Trafo2d {
+    return Trafo2d.scaling(scale)
+      .mul(Trafo2d.rotation(rotationRad))
+      .mul(Trafo2d.translation(translation));
   }
 
   get forward(): M33d { return this._forward; }
@@ -104,4 +187,8 @@ export class Trafo2d {
     yield* this._forward;
     yield* this._backward;
   }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "*"(a: Trafo2d, b: Trafo2d): Trafo2d { return a.mul(b); }
 }

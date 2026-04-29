@@ -205,4 +205,49 @@ export class M24f {
     target._data.set(from._data);
     return target;
   }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "+"(a: M24f, b: M24f): M24f { return a.add(b); }
+  static "-"(a: M24f, b: M24f): M24f;
+  static "-"(a: M24f): M24f;
+  static "-"(a: M24f, b?: M24f): M24f { return b ? a.sub(b) : a.neg(); }
+  static "*"(a: M24f, b: V4f): V2f;
+  static "*"(a: M24f, b: number): M24f;
+  static "*"(a: number, b: M24f): M24f;
+  static "*"(a: M24f | number, b: M24f | V4f | number): M24f | V2f {
+    if (typeof a === "number") return (b as M24f).mul(a);
+    return (a as { mul(o: V4f | number): M24f | V2f }).mul(b as V4f | number);
+  }
+
+  "+="(o: M24f): void {
+    this._data[0]! += o._data[0]!;
+    this._data[1]! += o._data[1]!;
+    this._data[2]! += o._data[2]!;
+    this._data[3]! += o._data[3]!;
+    this._data[4]! += o._data[4]!;
+    this._data[5]! += o._data[5]!;
+    this._data[6]! += o._data[6]!;
+    this._data[7]! += o._data[7]!;
+  }
+  "-="(o: M24f): void {
+    this._data[0]! -= o._data[0]!;
+    this._data[1]! -= o._data[1]!;
+    this._data[2]! -= o._data[2]!;
+    this._data[3]! -= o._data[3]!;
+    this._data[4]! -= o._data[4]!;
+    this._data[5]! -= o._data[5]!;
+    this._data[6]! -= o._data[6]!;
+    this._data[7]! -= o._data[7]!;
+  }
+  "*="(o: number): void {
+    this._data[0]! *= o;
+    this._data[1]! *= o;
+    this._data[2]! *= o;
+    this._data[3]! *= o;
+    this._data[4]! *= o;
+    this._data[5]! *= o;
+    this._data[6]! *= o;
+    this._data[7]! *= o;
+  }
 }

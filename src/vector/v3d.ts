@@ -427,5 +427,53 @@ export class V3d {
     target._data[2] = from._data[2]!;
     return target;
   }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "+"(a: V3d, b: V3d): V3d { return a.add(b); }
+  static "-"(a: V3d, b: V3d): V3d;
+  static "-"(a: V3d): V3d;
+  static "-"(a: V3d, b?: V3d): V3d { return b ? a.sub(b) : a.neg(); }
+  static "*"(a: V3d, b: V3d): V3d;
+  static "*"(a: V3d, b: number): V3d;
+  static "*"(a: number, b: V3d): V3d;
+  static "*"(a: V3d | number, b: V3d | number): V3d {
+    if (typeof a === "number") return (b as V3d).mul(a);
+    return a.mul(b as V3d | number);
+  }
+  static "/"(a: V3d, b: V3d): V3d;
+  static "/"(a: V3d, b: number): V3d;
+  static "/"(a: V3d, b: V3d | number): V3d { return a.div(b); }
+
+  "+="(o: V3d): void {
+    this._data[0]! += o._data[0]!;
+    this._data[1]! += o._data[1]!;
+    this._data[2]! += o._data[2]!;
+  }
+  "-="(o: V3d): void {
+    this._data[0]! -= o._data[0]!;
+    this._data[1]! -= o._data[1]!;
+    this._data[2]! -= o._data[2]!;
+  }
+  "*="(o: V3d): void;
+  "*="(o: number): void;
+  "*="(o: V3d | number): void {
+    if (typeof o === "number") { this._data[0]! *= o; this._data[1]! *= o; this._data[2]! *= o; }
+    else {
+    this._data[0]! *= o._data[0]!;
+    this._data[1]! *= o._data[1]!;
+    this._data[2]! *= o._data[2]!;
+  }
+  }
+  "/="(o: V3d): void;
+  "/="(o: number): void;
+  "/="(o: V3d | number): void {
+    if (typeof o === "number") { const inv = 1 / o; this._data[0]! *= inv; this._data[1]! *= inv; this._data[2]! *= inv; }
+    else {
+    this._data[0]! /= o._data[0]!;
+    this._data[1]! /= o._data[1]!;
+    this._data[2]! /= o._data[2]!;
+  }
+  }
 }
 

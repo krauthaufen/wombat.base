@@ -19,6 +19,17 @@ export class Scale2d {
   static uniform(s: number): Scale2d { return new Scale2d(new V2d(s, s)); }
   static from(v: V2d): Scale2d { return new Scale2d(v); }
 
+  static scaling(v: V2d): Scale2d;
+  static scaling(sx: number, sy: number): Scale2d;
+  static scaling(s: number): Scale2d;
+  static scaling(a: V2d | number, b?: number): Scale2d {
+    if (typeof a === "number") {
+      if (b === undefined) return new Scale2d(new V2d(a, a));
+      return new Scale2d(new V2d(a, b));
+    }
+    return new Scale2d(a);
+  }
+
   get scale(): V2d { return this._scale; }
 
   transform(p: V2d): V2d { return p.mul(this._scale); }
@@ -63,4 +74,8 @@ export class Scale2d {
   toString(): string { return `Scale2d(${this._scale.toString()})`; }
 
   *[Symbol.iterator](): Iterator<number> { yield* this._scale; }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "*"(a: Scale2d, b: Scale2d): Scale2d { return a.mul(b); }
 }

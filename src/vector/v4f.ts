@@ -394,6 +394,58 @@ export class V4f {
     target._data[3] = from._data[3]!;
     return target;
   }
+
+  // ---------- operator overloads (boperators) ----------
+
+  static "+"(a: V4f, b: V4f): V4f { return a.add(b); }
+  static "-"(a: V4f, b: V4f): V4f;
+  static "-"(a: V4f): V4f;
+  static "-"(a: V4f, b?: V4f): V4f { return b ? a.sub(b) : a.neg(); }
+  static "*"(a: V4f, b: V4f): V4f;
+  static "*"(a: V4f, b: number): V4f;
+  static "*"(a: number, b: V4f): V4f;
+  static "*"(a: V4f | number, b: V4f | number): V4f {
+    if (typeof a === "number") return (b as V4f).mul(a);
+    return a.mul(b as V4f | number);
+  }
+  static "/"(a: V4f, b: V4f): V4f;
+  static "/"(a: V4f, b: number): V4f;
+  static "/"(a: V4f, b: V4f | number): V4f { return a.div(b); }
+
+  "+="(o: V4f): void {
+    this._data[0]! += o._data[0]!;
+    this._data[1]! += o._data[1]!;
+    this._data[2]! += o._data[2]!;
+    this._data[3]! += o._data[3]!;
+  }
+  "-="(o: V4f): void {
+    this._data[0]! -= o._data[0]!;
+    this._data[1]! -= o._data[1]!;
+    this._data[2]! -= o._data[2]!;
+    this._data[3]! -= o._data[3]!;
+  }
+  "*="(o: V4f): void;
+  "*="(o: number): void;
+  "*="(o: V4f | number): void {
+    if (typeof o === "number") { this._data[0]! *= o; this._data[1]! *= o; this._data[2]! *= o; this._data[3]! *= o; }
+    else {
+    this._data[0]! *= o._data[0]!;
+    this._data[1]! *= o._data[1]!;
+    this._data[2]! *= o._data[2]!;
+    this._data[3]! *= o._data[3]!;
+  }
+  }
+  "/="(o: V4f): void;
+  "/="(o: number): void;
+  "/="(o: V4f | number): void {
+    if (typeof o === "number") { const inv = 1 / o; this._data[0]! *= inv; this._data[1]! *= inv; this._data[2]! *= inv; this._data[3]! *= inv; }
+    else {
+    this._data[0]! /= o._data[0]!;
+    this._data[1]! /= o._data[1]!;
+    this._data[2]! /= o._data[2]!;
+    this._data[3]! /= o._data[3]!;
+  }
+  }
 }
 
 /** Convenience constructor alias: `V4fOf(x, y, z, w)`. */

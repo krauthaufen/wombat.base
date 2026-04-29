@@ -1,4 +1,4 @@
-// Public barrel for `@aardworx/aardvark-ts`.
+// Public barrel for `@aardworx/wombat.base`.
 
 export * from "./scalar.js";
 

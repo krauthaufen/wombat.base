@@ -1,6 +1,6 @@
-# aardvark-ts — scope and design
+# wombat.base — scope and design
 
-This document is the canonical specification of what `@aardworx/aardvark-ts`
+This document is the canonical specification of what `@aardworx/wombat.base`
 ships in v0.1, with the naming, precision, storage, and array-view
 contracts every implementer needs to honour. Read it before writing
 or reviewing code in this repository.
@@ -45,7 +45,7 @@ or reviewing code in this repository.
   rhs)`). The pure form is the default; the others are escape hatches
   for hot loops.
 - Equality methods exist on every type and are compatible with
-  `@aardworx/adaptive`'s `defaultHash` / `defaultEquals`. `V3f`
+  `@aardworx/wombat.adaptive`'s `defaultHash` / `defaultEquals`. `V3f`
   equality is component-wise `===` over the f32 stored values
   (which is what people mean by "vector equality" 99% of the time).
   Tolerance comparisons live on a separate `approxEqual(a, b, eps)`.
@@ -112,7 +112,7 @@ Every vector exposes:
   - `approxEqual(other, eps)`
 - Hashing:
   - `getHashCode()` — combines component hashes; matches the convention
-    used by `@aardworx/adaptive`'s `HashMap`.
+    used by `@aardworx/wombat.adaptive`'s `HashMap`.
 - Iteration:
   - `[Symbol.iterator]()` yields `x, y, z, w` in order so spread /
     `Array.from` / destructuring work.
@@ -595,15 +595,15 @@ round of docs) for code samples that justify the plugin.
 
 ## 7. Hashing and equality
 
-Hashing must be compatible with `@aardworx/adaptive`'s
+Hashing must be compatible with `@aardworx/wombat.adaptive`'s
 `defaultHash` so vector / matrix / box instances can sit as keys in
 its `HashMap` / `HashSet`.
 
 - Every primitive defines `getHashCode(): number` returning a 32-bit
-  integer (matching the method name `@aardworx/adaptive`'s
+  integer (matching the method name `@aardworx/wombat.adaptive`'s
   `defaultHash` looks for via the `CustomEquatable` interface).
 - The hash combines component hashes via the FNV-style mix used in
-  `@aardworx/adaptive`'s `equality.ts`. Component hashes for `number`
+  `@aardworx/wombat.adaptive`'s `equality.ts`. Component hashes for `number`
   go through the same `defaultHash(n)` so float quirks (NaN, ±0) are
   handled consistently across the stack.
 - `equals(other)` is exact bit-equality on the backing `TypedArray`.
@@ -612,8 +612,8 @@ its `HashMap` / `HashSet`.
 ## 8. Package layout
 
 ```
-aardvark-ts/
-├─ package.json                # @aardworx/aardvark-ts
+wombat.base/
+├─ package.json                # @aardworx/wombat.base
 ├─ tsconfig.json
 ├─ tsconfig.build.json
 ├─ vitest.config.ts
@@ -662,7 +662,7 @@ aardvark-ts/
 │  │  ├─ lu.ts, qr.ts, svd.ts, eigen.ts, cholesky.ts
 │  │  └─ solve.ts
 │  └─ internal/
-│     ├─ hash.ts               # 32-bit FNV mix, compatible with @aardworx/adaptive
+│     ├─ hash.ts               # 32-bit FNV mix, compatible with @aardworx/wombat.adaptive
 │     └─ format.ts             # toString helpers
 ├─ tests/
 │  ├─ vector/, matrix/, color/, rotation/, trafo/, box/, geometry/,
@@ -684,7 +684,7 @@ adaptive port (which took ~3 months for a comparable surface).
 
 - Package skeleton, build pipeline (`tsc` only, no Vite),
   vitest config.
-- `internal/hash.ts` matched against `@aardworx/adaptive`'s defaults.
+- `internal/hash.ts` matched against `@aardworx/wombat.adaptive`'s defaults.
 - `scalar.ts` constants and helpers.
 - One scalar primitive end-to-end as the canonical pattern: `V3f` +
   `V3fArray` + tests + benchmarks. Lock down the prototype shape,
@@ -731,9 +731,9 @@ adaptive port (which took ~3 months for a comparable surface).
 
 ### Phase 6 — operator plugin (planned in `tshade`'s repo)
 
-Once `aardvark-ts` is stable, the `@aardworx/aardvark-operators`
+Once `wombat.base` is stable, the `@aardworx/aardvark-operators`
 plugin gets built (see `tshade/README.md`). At that point we
-re-publish `aardvark-ts` v0.2 with internals rewritten using
+re-publish `wombat.base` v0.2 with internals rewritten using
 operators where it improves readability. The public `.d.ts` doesn't
 change.
 
@@ -760,7 +760,7 @@ for the plugin and v0.2.
 
 ## 11. Compatibility notes
 
-- The hash format must match `@aardworx/adaptive` for cross-package
+- The hash format must match `@aardworx/wombat.adaptive` for cross-package
   use as `HashMap` keys.
 - Array-view byte layouts must match WebGL's vertex buffer
   expectations: packed AoS, no padding, column-major matrices.
