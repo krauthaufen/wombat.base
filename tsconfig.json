@@ -12,7 +12,11 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "plugins": [
+      { "transform": "@aardworx/aardvark-operators" },
+      { "name": "@aardworx/aardvark-operators/lang-service" }
+    ]
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"]
 }

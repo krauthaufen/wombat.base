@@ -44,15 +44,18 @@
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "npm run clean && tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run clean && tspc -p tsconfig.build.json",
+    "typecheck": "tspc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "prepare": "ts-patch install -s",
     "prepack": "npm run build",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
+    "@aardworx/aardvark-operators": "^0.2.1",
     "@types/node": "^20.11.0",
+    "ts-patch": "^3.1.2",
     "typescript": "^5.4.0",
     "vitest": "^1.4.0"
   }

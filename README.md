@@ -72,14 +72,54 @@ Out of scope, at least for v0.1:
 
 ## Operator overloading
 
-Method-based API ships first (`a.add(b)`, `a.mul(b)`, `m.transform(v)`)
-because it works in any TS toolchain. Once the operator-rewriting
-plugin (`@aardworx/aardvark-operators`, planned as the next package
-after this one) lands, this library's own internals get rebuilt with
-operators — the public `.d.ts` doesn't change, but readers of the
-source see real algebra. See the [tshade
-plan](https://github.com/krauthaufen/tshade) for the operator-plugin
-design.
+`@aardworx/aardvark-operators` is wired into the build (via `ts-patch`
++ `tspc`) and into vitest (via a small inline Vite plugin in
+`vitest.config.ts`). Every numeric primitive declares a static
+`__aardworxMathBrand` so the plugin recognises it. Source code can
+use `+`/`-`/`*`/`/`/`%`/unary-`-`/comparisons/compound-assignment;
+the build emits the corresponding method calls.
+
+Method API works regardless — write `a.add(b)` if you prefer; the
+plugin sugar is opt-in per consumer project.
+
+### Using in WebStorm / VS Code
+
+After `npm install`, the workspace's `tsconfig.json` declares the
+language-service plugin:
+
+```jsonc
+{
+  "compilerOptions": {
+    "plugins": [
+      { "transform": "@aardworx/aardvark-operators" },
+      { "name": "@aardworx/aardvark-operators/lang-service" }
+    ]
+  }
+}
+```
+
+In **WebStorm**: `Settings → Languages & Frameworks → TypeScript`,
+make sure the TypeScript service uses the project's bundled compiler
+(`node_modules/typescript`). The language-service plugin loads
+automatically; operator usage on math types stops being underlined.
+
+In **VS Code**: open a `.ts` file in the workspace and run
+`> TypeScript: Select TypeScript Version` → "Use Workspace Version".
+Same outcome.
+
+In **Neovim** (via `nvim-lspconfig` + `tsserver`): no extra config
+needed — tsserver picks up the `plugins` from `tsconfig.json`
+automatically.
+
+### Limitations of editor support (current v0.1)
+
+- Operator diagnostics are suppressed, but TS still infers the result
+  of `a + b` as the inferred-error type (often `any` or the wider
+  union). Hover-over may show the wrong type. The build is correct
+  regardless because the transformer rewrites to method calls before
+  type checking matters.
+- Compound assignment (`+=`) on complex l-values (`arr[i++].field`)
+  evaluates the LHS twice. Use plain `=` rebinding for those cases.
 
 ## What's documented where
 

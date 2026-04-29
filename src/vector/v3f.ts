@@ -19,6 +19,9 @@ const COMPONENT_COUNT = 3;
 const BYTES = COMPONENT_COUNT * F32_BYTES;
 
 export class V3f {
+  /** Brand: marks this class as an aardvark math type for the operator plugin. */
+  static readonly __aardworxMathBrand: "V3f" = "V3f";
+
   /**
    * Backing storage. Length 3. Either freshly allocated (owned form)
    * or a subarray over a larger buffer (view form, returned by
