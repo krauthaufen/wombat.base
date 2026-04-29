@@ -16,9 +16,9 @@ describe("geometry smoke", () => {
   it("Ray2d–Ray2d intersection at the unit corner", () => {
     const r1 = new Ray2d(new V2d(0, 0), new V2d(1, 0));
     const r2 = new Ray2d(new V2d(1, -1), new V2d(0, 1));
-    const hit = r1.intersection(r2);
-    expect(hit).toBeDefined();
-    expect(hit!.point.approxEqual(new V2d(1, 0), 1e-12)).toBe(true);
+    const t = r1.intersection(r2);
+    expect(t).toBeCloseTo(1, 12);
+    expect(r1.pointAt(t!).approxEqual(new V2d(1, 0), 1e-12)).toBe(true);
   });
 
   it("Line2d signedDistance on the directed line", () => {

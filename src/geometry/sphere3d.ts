@@ -69,10 +69,10 @@ export class Sphere3d {
     if (other instanceof Plane3d) {
       return Math.abs(other.signedDistance(this.center)) <= this.radius;
     }
-    // Ray3d
-    const hit = other.intersection(this);
-    if (!hit) return false;
-    return hit.tMax >= 0;
+    // Ray3d — `intersection` returns the first non-negative t, so any
+    // defined result already means the ray hits the sphere ahead of
+    // its origin.
+    return other.intersection(this) !== undefined;
   }
 
   /**

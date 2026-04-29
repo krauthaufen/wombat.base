@@ -11,6 +11,12 @@ import { Line3d } from "../../src/geometry/line3d.js";
 import { Line2d } from "../../src/geometry/line2d.js";
 import { Circle2d } from "../../src/geometry/circle2d.js";
 import { Circle3d } from "../../src/geometry/circle3d.js";
+import { Ray3d } from "../../src/geometry/ray3d.js";
+import { Ray2d } from "../../src/geometry/ray2d.js";
+import { Quad3d } from "../../src/geometry/quad3d.js";
+import { Quad2d } from "../../src/geometry/quad2d.js";
+import { Polygon3d } from "../../src/geometry/polygon3d.js";
+import { Polygon2d } from "../../src/geometry/polygon2d.js";
 
 const EPS = 1e-9;
 
