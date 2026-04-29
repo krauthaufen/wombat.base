@@ -1,0 +1,59 @@
+{
+  "name": "@aardworx/aardvark-ts",
+  "version": "0.1.0",
+  "description": "TypeScript port of Aardvark.Base's math and geometry primitives — vectors, matrices, quaternions, transformations, bounding boxes, and packed array views, with TypedArray-backed precision.",
+  "license": "MIT",
+  "author": "krauthaufen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/krauthaufen/aardvark-ts.git"
+  },
+  "homepage": "https://github.com/krauthaufen/aardvark-ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "aardvark",
+    "math",
+    "geometry",
+    "vector",
+    "matrix",
+    "quaternion",
+    "linear-algebra"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0"
+  }
+}

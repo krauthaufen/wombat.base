@@ -111,7 +111,7 @@ Every vector exposes:
   - `equals(other)` — exact bit-equal on backing TypedArray
   - `approxEqual(other, eps)`
 - Hashing:
-  - `hashCode()` — combines component hashes; matches the convention
+  - `getHashCode()` — combines component hashes; matches the convention
     used by `@aardworx/adaptive`'s `HashMap`.
 - Iteration:
   - `[Symbol.iterator]()` yields `x, y, z, w` in order so spread /
@@ -598,8 +598,9 @@ Hashing must be compatible with `@aardworx/adaptive`'s
 `defaultHash` so vector / matrix / box instances can sit as keys in
 its `HashMap` / `HashSet`.
 
-- Every primitive defines `hashCode(): number` returning a 32-bit
-  integer.
+- Every primitive defines `getHashCode(): number` returning a 32-bit
+  integer (matching the method name `@aardworx/adaptive`'s
+  `defaultHash` looks for via the `CustomEquatable` interface).
 - The hash combines component hashes via the FNV-style mix used in
   `@aardworx/adaptive`'s `equality.ts`. Component hashes for `number`
   go through the same `defaultHash(n)` so float quirks (NaN, ±0) are
