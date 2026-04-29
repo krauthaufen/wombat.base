@@ -138,11 +138,12 @@ Notation: `M{rows}{cols}{element}`. So `M44f` is 4×4 f32; `M23f` is
 2 rows × 3 cols f32 (matches Aardvark.Base; opposite of GLSL's
 `mat2x3` which is 2 *cols* × 3 *rows*).
 
-**Storage is column-major** for compatibility with WebGL and WGSL
-uniform layouts: `m.M00` lives at index 0, `m.M10` at index 1,
-`m.M01` at index `rows`, …, `m.M(rows-1)(cols-1)` at index
-`rows*cols-1`. (Aardvark.Base.M44d is also column-major in memory,
-so this matches.)
+**Storage is row-major** to match `Aardvark.Base.M44d` and the rest
+of the Aardvark stack: `m.M00` lives at index 0, `m.M01` at index 1,
+`m.M0(C-1)` at index `C-1`, then row 1 starts at index `C`, etc.
+For row `r`, col `c`: `_data[r * C + c]`. WebGL / WGSL uniform
+uploads pass `transpose = true` (or transpose at the boundary) since
+their convention is column-major.
 
 API per matrix:
 
