@@ -41,6 +41,26 @@ export { M34d } from "./matrix/m34d.js";
 export { M42d } from "./matrix/m42d.js";
 export { M43d } from "./matrix/m43d.js";
 
+// Random
+export { XoroShiro128Plus } from "./random/xoroshiro128.js";
+
+// Rotations
+export { Rot2f } from "./rotation/rot2f.js";
+export { Rot2d } from "./rotation/rot2d.js";
+export { Rot3f, type EulerOrder as EulerOrderF } from "./rotation/rot3f.js";
+export { Rot3d, type EulerOrder } from "./rotation/rot3d.js";
+
+// Ranges & bounding boxes
+export { Range1i } from "./box/range1i.js";
+export { Range1f } from "./box/range1f.js";
+export { Range1d } from "./box/range1d.js";
+export { Box2i } from "./box/box2i.js";
+export { Box3i } from "./box/box3i.js";
+export { Box2f } from "./box/box2f.js";
+export { Box3f } from "./box/box3f.js";
+export { Box2d } from "./box/box2d.js";
+export { Box3d } from "./box/box3d.js";
+
 // Array views (for now, just the float ones — others can wait)
 export { V2fArray } from "./vector/array/v2fArray.js";
 export { V3fArray } from "./vector/array/v3fArray.js";
