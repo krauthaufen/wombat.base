@@ -1,0 +1,10 @@
+{
+  "typescript.tsdk": "/home/schorsch/projects/aardvark-ts/node_modules/typescript/lib",
+  "typescript.tsserver.pluginPaths": [
+    "/home/schorsch/projects/aardvark-ts/node_modules"
+  ],
+  "typescript.tsserver.log": "verbose",
+  "typescript.tsserver.maxTsServerMemory": 4096,
+  "security.workspace.trust.untrustedFiles": "open",
+  "files.eol": "\n"
+}
