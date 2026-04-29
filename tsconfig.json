@@ -15,7 +15,7 @@
     "noEmit": true,
     "plugins": [
       { "transform": "@aardworx/aardvark-operators" },
-      { "name": "@aardworx/aardvark-operators/lang-service" }
+      { "name": "@aardworx/aardvark-operators-tsserver" }
     ]
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"]

@@ -54,6 +54,7 @@
   },
   "devDependencies": {
     "@aardworx/aardvark-operators": "^0.2.1",
+    "@aardworx/aardvark-operators-tsserver": "^0.1.0",
     "@types/node": "^20.11.0",
     "ts-patch": "^3.1.2",
     "typescript": "^5.4.0",
