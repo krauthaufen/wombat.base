@@ -13,6 +13,7 @@
 // V3fArray.fromIterable([new V3f(1.1, 0, 0)]).get(0).x` always.
 
 import { combineHash, hashNumber } from "../internal/hash.js";
+import { V2f } from "./v2f.js";
 import { V3b } from "./v3b.js";
 
 const F32_BYTES = 4;
@@ -31,11 +32,27 @@ export class V3f {
    */
   readonly _data: Float32Array;
 
-  constructor(x: number = 0, y: number = 0, z: number = 0) {
+  /**
+   * Construct a V3f from three scalars or a (V2f, scalar) /
+   * (scalar, V2f) promotion. Mirrors the GLSL/WGSL `vec3(...)`
+   * forms.
+   */
+  constructor();
+  constructor(x: number, y: number, z: number);
+  constructor(xy: V2f, z: number);
+  constructor(x: number, yz: V2f);
+  constructor(...args: ReadonlyArray<number | V2f>) {
     this._data = new Float32Array(3);
-    this._data[0] = x;
-    this._data[1] = y;
-    this._data[2] = z;
+    let i = 0;
+    for (const a of args) {
+      if (i >= 3) break;
+      if (typeof a === "number") {
+        this._data[i++] = a;
+      } else if (a instanceof V2f) {
+        this._data[i++] = a.x;
+        if (i < 3) this._data[i++] = a.y;
+      }
+    }
   }
 
   /**

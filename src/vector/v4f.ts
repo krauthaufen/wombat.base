@@ -4,6 +4,8 @@
 // (see v3f.ts for the long-form rationale).
 
 import { combineHash, hashNumber } from "../internal/hash.js";
+import { V2f } from "./v2f.js";
+import { V3f } from "./v3f.js";
 import { V4b } from "./v4b.js";
 
 const F32_BYTES = 4;
@@ -16,12 +18,37 @@ export class V4f {
   /** @internal */
   readonly _data: Float32Array;
 
-  constructor(x: number = 0, y: number = 0, z: number = 0, w: number = 0) {
+  /**
+   * Construct a V4f from any combination of scalars and shorter
+   * vectors that totals four components. Mirrors the GLSL/WGSL
+   * `vec4(...)` promotion forms so users can write
+   * `new V4f(v3, 1.0)` or `new V4f(uv, 0.0, 1.0)` from CPU or
+   * shader code interchangeably.
+   */
+  constructor();
+  constructor(x: number, y: number, z: number, w: number);
+  constructor(xy: V2f, z: number, w: number);
+  constructor(x: number, yz: V2f, w: number);
+  constructor(x: number, y: number, zw: V2f);
+  constructor(xy: V2f, zw: V2f);
+  constructor(xyz: V3f, w: number);
+  constructor(x: number, yzw: V3f);
+  constructor(...args: ReadonlyArray<number | V2f | V3f>) {
     this._data = new Float32Array(4);
-    this._data[0] = x;
-    this._data[1] = y;
-    this._data[2] = z;
-    this._data[3] = w;
+    let i = 0;
+    for (const a of args) {
+      if (i >= 4) break;
+      if (typeof a === "number") {
+        this._data[i++] = a;
+      } else if (a instanceof V2f) {
+        this._data[i++] = a.x;
+        if (i < 4) this._data[i++] = a.y;
+      } else if (a instanceof V3f) {
+        this._data[i++] = a.x;
+        if (i < 4) this._data[i++] = a.y;
+        if (i < 4) this._data[i++] = a.z;
+      }
+    }
   }
 
   static viewOnto(buffer: ArrayBufferLike, byteOffset: number): V4f {
