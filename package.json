@@ -1,6 +1,6 @@
 {
   "name": "@aardworx/wombat.base",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Math and geometry primitives for the Wombat TypeScript stack — vectors, matrices, quaternions, transformations, bounding boxes, and packed array views, with TypedArray-backed precision. Port of F# Aardvark.Base.",
   "license": "MIT",
   "author": "krauthaufen",
