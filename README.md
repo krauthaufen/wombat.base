@@ -5,25 +5,24 @@ A TypeScript port of `Aardvark.Base.Math` and `Aardvark.Base.Geometry`
 tool ends up needing. Published as `@aardworx/wombat.base`.
 
 This is a foundation library: pure data types and pure functions. No
-DOM, no WebGL, no adaptive, no JSX. Other packages (`tshade`,
-`adaptive-ui` extensions, future `aardvark-rendering` ports) sit on
-top.
+DOM, no WebGL, no adaptive, no JSX. Other packages
+(`@aardworx/wombat.shader-*`, the in-progress `wombat.rendering`)
+sit on top.
 
 ## Why this exists
 
 The TS port of the Aardvark stack progresses bottom-up:
 
 1. [`@aardworx/wombat.adaptive`](https://github.com/krauthaufen/wombat.adaptive) — incremental computations. ✓
-2. [`@aardworx/wombat.adaptive-ui`](https://github.com/krauthaufen/adaptive-ui) — adaptive direct-DOM JSX runtime. ✓
-3. **`@aardworx/wombat.base`** — math/geometry primitives. *(this repo)*
-4. [`tshade`](https://github.com/krauthaufen/tshade) — F#-style shader DSL with composition + cross-stage I/O elimination.
-5. (later) `aardvark-rendering`-equivalent — scene graph, pipelines.
+2. **`@aardworx/wombat.base`** — math/geometry primitives. *(this repo)*
+3. [`@aardworx/wombat.shader-runtime`](https://github.com/krauthaufen/wombat.shader) — F#-style shader DSL with composition + cross-stage I/O elimination. ✓
+4. (later) `wombat.rendering`-equivalent — scene graph, pipelines on top of WebGPU.
 
-`tshade` and any rendering pipeline both want operators on `V3f` /
-`M44f` / etc. on the **CPU side** (for camera matrices, instance
-transforms, point-cloud filtering — anything that runs in JS, not in
-the shader). So this package has to land before either of those
-becomes ergonomic.
+`wombat.shader` and any rendering pipeline both want operators on
+`V3f` / `M44f` / etc. on the **CPU side** (for camera matrices,
+instance transforms, point-cloud filtering — anything that runs in
+JS, not in the shader). So this package has to land before either of
+those becomes ergonomic.
 
 ## Scope
 

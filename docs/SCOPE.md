@@ -729,13 +729,13 @@ adaptive port (which took ~3 months for a comparable surface).
   shows up in a flame graph, add `*InPlace` / `*Into` variants.
 - Documentation: GEOMETRY.md, OPERATORS.md.
 
-### Phase 6 — operator plugin (planned in `tshade`'s repo)
+### Phase 6 — operator plugin (downstream)
 
-Once `wombat.base` is stable, the `@aardworx/aardvark-operators`
-plugin gets built (see `tshade/README.md`). At that point we
-re-publish `wombat.base` v0.2 with internals rewritten using
-operators where it improves readability. The public `.d.ts` doesn't
-change.
+Once `wombat.base` is stable the operator plugin
+(`@boperators/*`) lets users write `+` / `-` / `*` / `/` instead
+of method calls. `wombat.shader` already uses it; downstream
+ports of `wombat.base`'s internals to operator syntax can land
+in a v0.2 without changing the public `.d.ts`.
 
 Total budget: ~13 weeks (3+ months) for v0.1 plus another 4–5 weeks
 for the plugin and v0.2.
@@ -769,4 +769,4 @@ for the plugin and v0.2.
   because we mirror Aardvark.
 - All transforms are right-handed, column-major, `M·v` style. View
   matrices look down `-Z`. This matches the Aardvark.Rendering
-  conventions and what `tshade` will assume.
+  conventions and what `wombat.shader` assumes.
