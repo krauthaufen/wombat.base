@@ -5,6 +5,7 @@
 // length/distance return plain JS numbers (floats); that's fine.
 
 import { combineHash, hashNumber } from "../internal/hash.js";
+import { V2i } from "./v2i.js";
 import { V3b } from "./v3b.js";
 
 const I32_BYTES = 4;
@@ -17,11 +18,23 @@ export class V3i {
   /** @internal */
   readonly _data: Int32Array;
 
-  constructor(x: number = 0, y: number = 0, z: number = 0) {
+  /** Three scalars or `(V2i, scalar)` / `(scalar, V2i)` promotion. */
+  constructor();
+  constructor(x: number, y: number, z: number);
+  constructor(xy: V2i, z: number);
+  constructor(x: number, yz: V2i);
+  constructor(...args: ReadonlyArray<number | V2i>) {
     this._data = new Int32Array(3);
-    this._data[0] = x;
-    this._data[1] = y;
-    this._data[2] = z;
+    let i = 0;
+    for (const a of args) {
+      if (i >= 3) break;
+      if (typeof a === "number") {
+        this._data[i++] = a;
+      } else if (a instanceof V2i) {
+        this._data[i++] = a.x;
+        if (i < 3) this._data[i++] = a.y;
+      }
+    }
   }
 
   static viewOnto(buffer: ArrayBufferLike, byteOffset: number): V3i {

@@ -4,6 +4,8 @@
 // toward zero on assignment (TypedArray semantics).
 
 import { combineHash, hashNumber } from "../internal/hash.js";
+import { V2i } from "./v2i.js";
+import { V3i } from "./v3i.js";
 import { V4b } from "./v4b.js";
 
 const I32_BYTES = 4;
@@ -16,12 +18,34 @@ export class V4i {
   /** @internal */
   readonly _data: Int32Array;
 
-  constructor(x: number = 0, y: number = 0, z: number = 0, w: number = 0) {
+  /**
+   * Four scalars or any combination of scalars + V2i + V3i totalling
+   * four components. Mirrors GLSL/WGSL `ivec4(...)` promotion.
+   */
+  constructor();
+  constructor(x: number, y: number, z: number, w: number);
+  constructor(xy: V2i, z: number, w: number);
+  constructor(x: number, yz: V2i, w: number);
+  constructor(x: number, y: number, zw: V2i);
+  constructor(xy: V2i, zw: V2i);
+  constructor(xyz: V3i, w: number);
+  constructor(x: number, yzw: V3i);
+  constructor(...args: ReadonlyArray<number | V2i | V3i>) {
     this._data = new Int32Array(4);
-    this._data[0] = x;
-    this._data[1] = y;
-    this._data[2] = z;
-    this._data[3] = w;
+    let i = 0;
+    for (const a of args) {
+      if (i >= 4) break;
+      if (typeof a === "number") {
+        this._data[i++] = a;
+      } else if (a instanceof V2i) {
+        this._data[i++] = a.x;
+        if (i < 4) this._data[i++] = a.y;
+      } else if (a instanceof V3i) {
+        this._data[i++] = a.x;
+        if (i < 4) this._data[i++] = a.y;
+        if (i < 4) this._data[i++] = a.z;
+      }
+    }
   }
 
   static viewOnto(buffer: ArrayBufferLike, byteOffset: number): V4i {

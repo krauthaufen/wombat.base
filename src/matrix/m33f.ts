@@ -2,6 +2,7 @@
 // See m44f.ts for conventions.
 
 import { combineHash, hashNumber } from "../internal/hash.js";
+import { unpackVecs } from "../internal/varargs.js";
 import { V2f } from "../vector/v2f.js";
 import { V3f } from "../vector/v3f.js";
 
@@ -38,7 +39,10 @@ export class M33f {
     return m;
   })();
 
-  static fromRows(rows: V3f[]): M33f {
+  static fromRows(rows: ReadonlyArray<V3f>): M33f;
+  static fromRows(r0: V3f, r1: V3f, r2: V3f): M33f;
+  static fromRows(...args: V3f[] | [ReadonlyArray<V3f>]): M33f {
+    const rows = unpackVecs<V3f>(args);
     const m = new M33f();
     for (let r = 0; r < ROWS; r++) {
       const row = rows[r]!;
@@ -49,7 +53,10 @@ export class M33f {
     return m;
   }
 
-  static fromCols(cols: V3f[]): M33f {
+  static fromCols(cols: ReadonlyArray<V3f>): M33f;
+  static fromCols(c0: V3f, c1: V3f, c2: V3f): M33f;
+  static fromCols(...args: V3f[] | [ReadonlyArray<V3f>]): M33f {
+    const cols = unpackVecs<V3f>(args);
     const m = new M33f();
     for (let c = 0; c < COLS; c++) {
       const col = cols[c]!;

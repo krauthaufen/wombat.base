@@ -8,6 +8,7 @@
 // Same conventions as V3f (see v3f.ts for the long-form rationale).
 
 import { combineHash, hashNumber } from "../internal/hash.js";
+import { unpackVecs } from "../internal/varargs.js";
 import { V3f } from "../vector/v3f.js";
 import { V4f } from "../vector/v4f.js";
 import { M33f } from "./m33f.js";
@@ -48,7 +49,10 @@ export class M44f {
     return m;
   })();
 
-  static fromRows(rows: V4f[]): M44f {
+  static fromRows(rows: ReadonlyArray<V4f>): M44f;
+  static fromRows(r0: V4f, r1: V4f, r2: V4f, r3: V4f): M44f;
+  static fromRows(...args: V4f[] | [ReadonlyArray<V4f>]): M44f {
+    const rows = unpackVecs<V4f>(args);
     const m = new M44f();
     for (let r = 0; r < ROWS; r++) {
       const row = rows[r]!;
@@ -60,7 +64,10 @@ export class M44f {
     return m;
   }
 
-  static fromCols(cols: V4f[]): M44f {
+  static fromCols(cols: ReadonlyArray<V4f>): M44f;
+  static fromCols(c0: V4f, c1: V4f, c2: V4f, c3: V4f): M44f;
+  static fromCols(...args: V4f[] | [ReadonlyArray<V4f>]): M44f {
+    const cols = unpackVecs<V4f>(args);
     const m = new M44f();
     for (let c = 0; c < COLS; c++) {
       const col = cols[c]!;

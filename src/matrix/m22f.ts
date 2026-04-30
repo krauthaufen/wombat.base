@@ -2,6 +2,7 @@
 // See m44f.ts for conventions.
 
 import { combineHash, hashNumber } from "../internal/hash.js";
+import { unpackVecs } from "../internal/varargs.js";
 import { V2f } from "../vector/v2f.js";
 
 const ROWS = 2;
@@ -37,7 +38,10 @@ export class M22f {
     return m;
   })();
 
-  static fromRows(rows: V2f[]): M22f {
+  static fromRows(rows: ReadonlyArray<V2f>): M22f;
+  static fromRows(r0: V2f, r1: V2f): M22f;
+  static fromRows(...args: V2f[] | [ReadonlyArray<V2f>]): M22f {
+    const rows = unpackVecs<V2f>(args);
     const m = new M22f();
     for (let r = 0; r < ROWS; r++) {
       const row = rows[r]!;
@@ -47,7 +51,10 @@ export class M22f {
     return m;
   }
 
-  static fromCols(cols: V2f[]): M22f {
+  static fromCols(cols: ReadonlyArray<V2f>): M22f;
+  static fromCols(c0: V2f, c1: V2f): M22f;
+  static fromCols(...args: V2f[] | [ReadonlyArray<V2f>]): M22f {
+    const cols = unpackVecs<V2f>(args);
     const m = new M22f();
     for (let c = 0; c < COLS; c++) {
       const col = cols[c]!;
