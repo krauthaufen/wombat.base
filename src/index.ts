@@ -106,6 +106,17 @@ export { Quad2d } from "./geometry/quad2d.js";
 export { Quad3d } from "./geometry/quad3d.js";
 export { Polygon2d } from "./geometry/polygon2d.js";
 export { Polygon3d } from "./geometry/polygon3d.js";
+export {
+  type IIntersectable,
+  type IIntersectHit,
+  Intersectable,
+} from "./geometry/intersectable.js";
+export {
+  Bvh,
+  type BvhItem,
+  type BvhHit,
+  BVH_SPLIT_LIMIT,
+} from "./geometry/bvh.js";
 
 // Spatial cells
 export { Cell } from "./cell/cell.js";
