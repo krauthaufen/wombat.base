@@ -309,6 +309,125 @@ function bez3Xline(
 }
 
 // ---------------------------------------------------------------------------
+// Generic numeric solver: subdivision + Newton
+// ---------------------------------------------------------------------------
+//
+// Used for every pair where at least one segment is an implicit curve
+// (bez2×bez2, bez2×arc, arc×arc, plus all bez3×* combinations — same
+// policy Aardvark uses for the hardest pairs). Algorithm:
+//
+//   1. Subdivide both segments at their parameter-midpoints while the
+//      tight bboxes overlap. Recursion stops when both halves are
+//      smaller than `BBOX_TOL` in either axis, or `MAX_DEPTH` is hit.
+//   2. Each surviving leaf yields a seed `(ta, tb)` at the parameter
+//      midpoints.
+//   3. Newton-refine each seed against `F(ta, tb) = a(ta) - b(tb)`
+//      with Jacobian `[a'(ta), -b'(tb)]` and step `J⁻¹·F`. Bail out
+//      if the step takes us outside `[-Δ, 1+Δ]` or stalls.
+//   4. Accept the refined point if `|F| < eps`. For tangent pairs
+//      where Newton stalls but the seed already has `|F| < eps`,
+//      accept the seed itself (otherwise we'd miss tangencies).
+//   5. Cluster duplicates within `eps` in parameter or position space.
+
+const BBOX_TOL = 1e-10;
+const MAX_DEPTH = 40;
+
+function bboxesOverlap(a: PathSegment, b: PathSegment): boolean {
+  const ba = a.bounds(), bb = b.bounds();
+  return !(ba.max.x < bb.min.x
+        || bb.max.x < ba.min.x
+        || ba.max.y < bb.min.y
+        || bb.max.y < ba.min.y);
+}
+
+function bboxBelowTol(a: PathSegment): boolean {
+  const sz = a.bounds().size();
+  return sz.x < BBOX_TOL && sz.y < BBOX_TOL;
+}
+
+function newtonStep(
+  a: PathSegment, b: PathSegment,
+  ta: number, tb: number, eps: number,
+): { ta: number; tb: number; converged: boolean } {
+  for (let iter = 0; iter < 40; iter++) {
+    const pa = a.eval(ta), pb = b.eval(tb);
+    const fx = pa.x - pb.x, fy = pa.y - pb.y;
+    if (Math.hypot(fx, fy) < eps * 0.1) return { ta, tb, converged: true };
+    const da = a.derivative(ta), db = b.derivative(tb);
+    const det = db.x * da.y - da.x * db.y;
+    if (Math.abs(det) < 1e-22) return { ta, tb, converged: false };
+    const dTa = (db.y * fx - db.x * fy) / det;
+    const dTb = (da.y * fx - da.x * fy) / det;
+    ta += dTa;
+    tb += dTb;
+    if (ta < -T_EPS || ta > 1 + T_EPS || tb < -T_EPS || tb > 1 + T_EPS) {
+      return { ta, tb, converged: false };
+    }
+  }
+  return { ta, tb, converged: false };
+}
+
+function numericIntersect(
+  a: PathSegment, b: PathSegment, eps: number,
+): Array<[number, number]> {
+  const coinc = endpointCoincidence(a, b, eps);
+  // We don't early-return on coincidence here — there may also be
+  // *interior* intersections (a curve that grazes its neighbour mid-
+  // span and also shares an endpoint). Collect coincidence as the
+  // initial result list; numeric search adds the rest.
+  const result: Array<[number, number]> = coinc ?? [];
+
+  const seeds: Array<[number, number]> = [];
+  const recurse = (
+    aa: PathSegment, ta0: number, ta1: number,
+    bb: PathSegment, tb0: number, tb1: number,
+    depth: number,
+  ): void => {
+    if (!bboxesOverlap(aa, bb)) return;
+    if (depth >= MAX_DEPTH || (bboxBelowTol(aa) && bboxBelowTol(bb))) {
+      seeds.push([(ta0 + ta1) * 0.5, (tb0 + tb1) * 0.5]);
+      return;
+    }
+    const [aL, aR] = aa.split(0.5);
+    const [bL, bR] = bb.split(0.5);
+    const taM = (ta0 + ta1) * 0.5, tbM = (tb0 + tb1) * 0.5;
+    recurse(aL, ta0, taM, bL, tb0, tbM, depth + 1);
+    recurse(aL, ta0, taM, bR, tbM, tb1, depth + 1);
+    recurse(aR, taM, ta1, bL, tb0, tbM, depth + 1);
+    recurse(aR, taM, ta1, bR, tbM, tb1, depth + 1);
+  };
+  recurse(a, 0, 1, b, 0, 1, 0);
+
+  const accept = (ta: number, tb: number): void => {
+    if (ta < -T_EPS || ta > 1 + T_EPS) return;
+    if (tb < -T_EPS || tb > 1 + T_EPS) return;
+    const tac = clamp01(ta), tbc = clamp01(tb);
+    const pa = a.eval(tac), pb = b.eval(tbc);
+    if (!approxEqV2(pa, pb, eps)) return;
+    for (const [u, v] of result) {
+      if (Math.abs(u - tac) < eps && Math.abs(v - tbc) < eps) return;
+      if (approxEqV2(a.eval(u), pa, eps)) return;
+    }
+    result.push([tac, tbc]);
+  };
+
+  for (const [s0, s1] of seeds) {
+    const r = newtonStep(a, b, s0, s1, eps);
+    if (r.converged) {
+      accept(r.ta, r.tb);
+    } else {
+      // Tangent fallback: accept the seed if it already satisfies
+      // the position-equality test at `eps` (Newton stalled because
+      // the Jacobian is near-singular at a tangency, not because
+      // there's no intersection).
+      const pa = a.eval(s0), pb = b.eval(s1);
+      if (approxEqV2(pa, pb, eps)) accept(s0, s1);
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Pair-flip helper
 // ---------------------------------------------------------------------------
 
@@ -354,9 +473,10 @@ function dispatch(
   if (a.kind === "bezier2" && b.kind === "line") return bez2Xline(a, b, eps);
   if (a.kind === "bezier3" && b.kind === "line") return bez3Xline(a, b, eps);
 
-  throw new Error(
-    `intersections: not yet implemented for (${a.kind}, ${b.kind})`,
-  );
+  // Every implicit-curve × implicit-curve case routes through the
+  // generic subdivision + Newton solver. Same policy Aardvark uses
+  // for its bez3 cases; we extend it to bez2-pair and arc-pair too.
+  return numericIntersect(a, b, eps);
 }
 
 // ---------------------------------------------------------------------------

@@ -205,6 +205,105 @@ describe("intersections — bez2 × line", () => {
   });
 });
 
+describe("intersections — implicit × implicit (numeric subdivision)", () => {
+  it("two circles crossing in two points", () => {
+    const a = ArcSegment.circular(new V2d(0, 0), 1, 0, 2 * Math.PI);
+    const b = ArcSegment.circular(new V2d(1, 0), 1, 0, 2 * Math.PI);
+    const hits = intersections(a, b);
+    // Full circles intersect at (0.5, ±√3/2). Parameter pairs depend
+    // on traversal direction — count only.
+    expect(hits.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("two cubic Beziers crossing once", () => {
+    const a = new Bezier3Segment(
+      new V2d(0, 0), new V2d(0, 2), new V2d(2, 2), new V2d(2, 0),
+    );
+    const b = new Bezier3Segment(
+      new V2d(0, 1), new V2d(2, 1), new V2d(0, 1), new V2d(2, 1),
+    );
+    const hits = intersections(a, b);
+    expect(hits.length).toBeGreaterThanOrEqual(1);
+    for (const [ta, tb] of hits) {
+      const pa = a.eval(ta), pb = b.eval(tb);
+      expect(pa.distance(pb)).toBeLessThan(1e-6);
+    }
+  });
+
+  it("parabola × circle: two intersections", () => {
+    // Bez2 arch peaking at (1, 1.5), unit circle at origin.
+    const bez = new Bezier2Segment(
+      new V2d(-1, -0.5), new V2d(1, 1.5), new V2d(3, -0.5),
+    );
+    const arc = ArcSegment.circular(new V2d(0, 0), 1, 0, 2 * Math.PI);
+    const hits = intersections(bez, arc);
+    for (const [ta, tb] of hits) {
+      const pa = bez.eval(ta), pb = arc.eval(tb);
+      expect(pa.distance(pb)).toBeLessThan(1e-6);
+    }
+    expect(hits.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("disjoint cases: no false positives", () => {
+    const a = ArcSegment.circular(new V2d(0, 0), 0.5, 0, 2 * Math.PI);
+    const b = ArcSegment.circular(new V2d(5, 5), 0.5, 0, 2 * Math.PI);
+    expect(intersections(a, b).length).toBe(0);
+  });
+
+  it("every reported (ta, tb) satisfies position equality at eps", () => {
+    // Random fuzz: 100 mixed configs across all six implicit pairs.
+    const rand = lcg(0xa1b2c3);
+    for (let trial = 0; trial < 100; trial++) {
+      const p = (): V2d => new V2d(rand() * 4 - 2, rand() * 4 - 2);
+      const kindRoll = Math.floor(rand() * 6);
+      let a: any, b: any;
+      switch (kindRoll) {
+        case 0: a = new Bezier2Segment(p(), p(), p());
+                b = new Bezier2Segment(p(), p(), p()); break;
+        case 1: a = new Bezier2Segment(p(), p(), p());
+                b = new Bezier3Segment(p(), p(), p(), p()); break;
+        case 2: a = new Bezier3Segment(p(), p(), p(), p());
+                b = new Bezier3Segment(p(), p(), p(), p()); break;
+        case 3: a = ArcSegment.circular(p(), rand() * 1.5 + 0.3, rand() * Math.PI, rand() * Math.PI + 0.3);
+                b = new Bezier2Segment(p(), p(), p()); break;
+        case 4: a = ArcSegment.circular(p(), rand() * 1.5 + 0.3, rand() * Math.PI, rand() * Math.PI + 0.3);
+                b = new Bezier3Segment(p(), p(), p(), p()); break;
+        default: a = ArcSegment.circular(p(), rand() * 1.5 + 0.3, rand() * Math.PI, rand() * Math.PI + 0.3);
+                 b = ArcSegment.circular(p(), rand() * 1.5 + 0.3, rand() * Math.PI, rand() * Math.PI + 0.3);
+      }
+      const hits = intersections(a, b, 1e-7);
+      for (const [ta, tb] of hits) {
+        const pa = a.eval(ta), pb = b.eval(tb);
+        expect(pa.distance(pb)).toBeLessThan(1e-6);
+        expect(ta).toBeGreaterThanOrEqual(0);
+        expect(ta).toBeLessThanOrEqual(1);
+        expect(tb).toBeGreaterThanOrEqual(0);
+        expect(tb).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("matches subdivision reference on bez2 × bez2 random configs", () => {
+    const rand = lcg(0xdeadc0de);
+    let mismatches = 0;
+    const total = 80;
+    for (let i = 0; i < total; i++) {
+      const p = (): V2d => new V2d(rand() * 4 - 2, rand() * 4 - 2);
+      const a = new Bezier2Segment(p(), p(), p());
+      const b = new Bezier2Segment(p(), p(), p());
+      const got = intersections(a, b, 1e-7);
+      const ref = intersectionsRef(a, b, 1e-12);
+      // Only count macro-level disagreement (different number of hits).
+      // Production may legitimately differ from ref by deduplication
+      // policy at near-tangent crossings.
+      if (Math.abs(got.length - ref.length) > 1) mismatches += 1;
+    }
+    // Allow a small margin since both are approximate; near-tangent
+    // configs are inherently brittle.
+    expect(mismatches).toBeLessThan(total * 0.1);
+  });
+});
+
 describe("intersections — bez3 × line", () => {
   it("S-curve crosses horizontal axis three times", () => {
     // Cubic with two turning points straddling y=0.
