@@ -73,29 +73,42 @@ function endpointCoincidence(
  * `T_EPS` slack; clamps and re-checks position equality at `eps`
  * to guard against parallel-but-shifted false positives.
  */
+/** Append `[ta, tb]` to `out` unless an entry already there is within
+ *  `eps` in either parameter. Used by all solvers to merge their
+ *  endpoint-coincidence prefilter with their analytic interior hits
+ *  without producing duplicates. */
+function pushUnique(
+  out: Array<[number, number]>, ta: number, tb: number, eps: number,
+): void {
+  for (const [u, v] of out) {
+    if (Math.abs(u - ta) < eps && Math.abs(v - tb) < eps) return;
+  }
+  out.push([ta, tb]);
+}
+
 function lineXline(
   a: LineSegment, b: LineSegment, eps: number,
 ): Array<[number, number]> {
-  const coinc = endpointCoincidence(a, b, eps);
-  if (coinc !== undefined) return coinc;
+  const result: Array<[number, number]> = endpointCoincidence(a, b, eps) ?? [];
 
   const da = a.end.sub(a.start);
   const db = b.end.sub(b.start);
   const det = da.x * db.y - da.y * db.x;
-  if (det === 0) return []; // parallel / collinear
+  if (det === 0) return result; // parallel / collinear
 
   const ox = b.start.x - a.start.x;
   const oy = b.start.y - a.start.y;
   const ta = (ox * db.y - oy * db.x) / det;
   const tb = (ox * da.y - oy * da.x) / det;
 
-  if (ta < -T_EPS || ta > 1 + T_EPS) return [];
-  if (tb < -T_EPS || tb > 1 + T_EPS) return [];
+  if (ta < -T_EPS || ta > 1 + T_EPS) return result;
+  if (tb < -T_EPS || tb > 1 + T_EPS) return result;
 
   const ca = clamp01(ta), cb = clamp01(tb);
   const pa = a.eval(ca), pb = b.eval(cb);
-  if (!approxEqV2(pa, pb, eps)) return [];
-  return [[ca, cb]];
+  if (!approxEqV2(pa, pb, eps)) return result;
+  pushUnique(result, ca, cb, eps);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,12 +148,11 @@ function arcParamFromAngle(
 function arcXline(
   arc: ArcSegment, line: LineSegment, eps: number,
 ): Array<[number, number]> {
-  const coinc = endpointCoincidence(arc, line, eps);
-  if (coinc !== undefined) return coinc;
+  const result: Array<[number, number]> = endpointCoincidence(arc, line, eps) ?? [];
 
   const a0 = arc.axis0, a1 = arc.axis1, c = arc.center;
   const det = a0.x * a1.y - a0.y * a1.x;
-  if (det === 0) return []; // degenerate ellipse
+  if (det === 0) return result; // degenerate ellipse
 
   // Map a global point P to local (α, β) where ellipse = unit circle.
   const toLocal = (P: V2d): V2d => {
@@ -161,27 +173,18 @@ function arcXline(
   const C = p0.x * p0.x + p0.y * p0.y - 1;
 
   const [s0, s1] = realRootsOfQuadratic(A, B, C);
-  const result: Array<[number, number]> = [];
-  const seen: Array<[number, number]> = [];
 
   const tryRoot = (s: number): void => {
     if (!Number.isFinite(s)) return;
     if (s < -T_EPS || s > 1 + T_EPS) return;
     const sc = clamp01(s);
-    // Local intersection point on the unit circle.
     const lx = p0.x + sc * dx, ly = p0.y + sc * dy;
     const theta = Math.atan2(ly, lx);
     const ta = arcParamFromAngle(arc.startAngle, arc.deltaAngle, theta);
     if (ta === undefined) return;
-    // Validate position equality in global frame.
     const pa = arc.eval(ta), pb = line.eval(sc);
     if (!approxEqV2(pa, pb, eps)) return;
-    // Suppress duplicates (tangent → s0 = s1 case).
-    for (const [u, v] of seen) {
-      if (Math.abs(u - ta) < eps && Math.abs(v - sc) < eps) return;
-    }
-    seen.push([ta, sc]);
-    result.push([ta, sc]);
+    pushUnique(result, ta, sc, eps);
   };
 
   tryRoot(s0);
@@ -203,8 +206,7 @@ function arcXline(
 function bez2Xline(
   bez: Bezier2Segment, line: LineSegment, eps: number,
 ): Array<[number, number]> {
-  const coinc = endpointCoincidence(bez, line, eps);
-  if (coinc !== undefined) return coinc;
+  const result: Array<[number, number]> = endpointCoincidence(bez, line, eps) ?? [];
 
   const p0 = bez.start, p1 = bez.control, p2 = bez.end;
   const q0 = line.start, q1 = line.end;
@@ -224,7 +226,6 @@ function bez2Xline(
   const [t0, t1] = realRootsOfQuadratic(f2, f1, f0);
   const dLen2 = dx * dx + dy * dy;
 
-  const result: Array<[number, number]> = [];
   const tryRoot = (t: number): void => {
     if (!Number.isFinite(t)) return;
     if (t < -T_EPS || t > 1 + T_EPS) return;
@@ -236,10 +237,7 @@ function bez2Xline(
     const sc = clamp01(s);
     const lpx = q0.x + sc * dx, lpy = q0.y + sc * dy;
     if (Math.hypot(px - lpx, py - lpy) > eps) return;
-    for (const [u, v] of result) {
-      if (Math.abs(u - tc) < eps && Math.abs(v - sc) < eps) return;
-    }
-    result.push([tc, sc]);
+    pushUnique(result, tc, sc, eps);
   };
   tryRoot(t0);
   tryRoot(t1);
@@ -258,8 +256,7 @@ function bez2Xline(
 function bez3Xline(
   bez: Bezier3Segment, line: LineSegment, eps: number,
 ): Array<[number, number]> {
-  const coinc = endpointCoincidence(bez, line, eps);
-  if (coinc !== undefined) return coinc;
+  const result: Array<[number, number]> = endpointCoincidence(bez, line, eps) ?? [];
 
   const p0 = bez.start, p1 = bez.control1, p2 = bez.control2, p3 = bez.end;
   const q0 = line.start, q1 = line.end;
@@ -283,7 +280,6 @@ function bez3Xline(
 
   const [t0, t1, t2] = realRootsOfCubic(f3, f2, f1, f0);
   const dLen2 = dx * dx + dy * dy;
-  const result: Array<[number, number]> = [];
 
   const tryRoot = (t: number): void => {
     if (!Number.isFinite(t)) return;
@@ -297,10 +293,7 @@ function bez3Xline(
     const sc = clamp01(s);
     const lpx = q0.x + sc * dx, lpy = q0.y + sc * dy;
     if (Math.hypot(px - lpx, py - lpy) > eps) return;
-    for (const [u, v] of result) {
-      if (Math.abs(u - tc) < eps && Math.abs(v - sc) < eps) return;
-    }
-    result.push([tc, sc]);
+    pushUnique(result, tc, sc, eps);
   };
   tryRoot(t0);
   tryRoot(t1);

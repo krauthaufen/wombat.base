@@ -8,3 +8,8 @@ export {
 } from "./segment.js";
 export { Path } from "./path.js";
 export { intersections, DEFAULT_EPS } from "./intersect.js";
+export {
+  PlanarGraph,
+  type PlanarEdge,
+  buildPlanarGraph,
+} from "./planar-graph.js";
