@@ -38,6 +38,35 @@ export interface FlatTriangle {
   readonly vertices: readonly [V2d, V2d, V2d];
 }
 
+/**
+ * Outline-ribbon triangle for AA on straight (line) polygon edges.
+ *
+ * Each non-bridge LINE half-edge in a face boundary contributes a
+ * 2-triangle quad straddling the edge: 2 inner vertices ON the
+ * polygon boundary (`isOuter = 0`) and 2 outer vertices at the SAME
+ * world position but tagged for clip-space expansion in the vertex
+ * shader (`isOuter = 1`). The shader pushes outer vertices outward
+ * by exactly 1 framebuffer pixel along the per-vertex `outwardDir`,
+ * giving a 1-pixel-wide strip JUST OUTSIDE the polygon. Inside the
+ * strip, alpha ramps linearly from 1 (inner, on the polygon edge)
+ * to 0 (outer, 1 px out) → a 1-pixel AA halo with no overlap into
+ * the flat-fill interior.
+ *
+ * Curves don't need ribbons — their existing curve triangle in the
+ * bulge area handles AA via the implicit gradient (analytic
+ * sub-pixel distance, no expansion required).
+ */
+export interface RibbonTriangle {
+  /** World-space vertex positions (CCW). */
+  readonly vertices: readonly [V2d, V2d, V2d];
+  /** Per-vertex outward direction in world space. The shader
+   *  projects, normalises and scales to 1 px in NDC. Same direction
+   *  for inner+outer pair at each ribbon corner. */
+  readonly outward: readonly [V2d, V2d, V2d];
+  /** Per-vertex `isOuter` flag (0 = on polygon edge, 1 = 1px outside). */
+  readonly isOuter: readonly [number, number, number];
+}
+
 export interface FaceTriangulation {
   /** Interior triangles of the flat polygon approximation. */
   readonly flat: ReadonlyArray<FlatTriangle>;
@@ -46,6 +75,9 @@ export interface FaceTriangulation {
    *  knows whether the curve adds to or subtracts from the flat
    *  interior. */
   readonly curves: ReadonlyArray<CurveTriangle>;
+  /** Outline ribbons along boundary LINE edges (skipped for curves
+   *  and bridges). Empty when the face has no straight boundary. */
+  readonly ribbons: ReadonlyArray<RibbonTriangle>;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +262,107 @@ const flipM = (
  * inner region), so they detour + flip to `m = -1` and the bulge
  * region of the inner outline is excluded from the final fill.
  */
+/**
+ * Outline ribbons for AA on straight (line) polygon edges. One quad
+ * per non-bridge LINE half-edge, sitting JUST OUTSIDE the polygon
+ * boundary (after vertex-shader expansion by 1 framebuffer pixel).
+ *
+ * Per-vertex `outwardDir` is the bisector of the two adjacent
+ * non-bridge edge outward-normals at the shared corner — this gives
+ * gap-free joins at convex/concave corners up to a miter limit.
+ * Beyond the miter limit the bisector falls back to the per-edge
+ * normal (small bevel-like overhang at very sharp corners).
+ *
+ * Curve half-edges DO NOT get a ribbon — the curve triangle in the
+ * bulge handles AA via the implicit gradient, and adding a ribbon
+ * there would overlap the curve triangle (overdraw).
+ */
+function buildLineRibbons(
+  face: Face, extraction: FaceExtractionResult, graph: PlanarGraph,
+): RibbonTriangle[] {
+  // Collect boundary line half-edges in face traversal order.
+  type BHE = {
+    src: V2d; dst: V2d;
+    isLine: boolean; isBridge: boolean;
+  };
+  const edges: BHE[] = [];
+  for (const heIdx of face.halfEdges) {
+    const he = extraction.halfEdges[heIdx]!;
+    const edge = graph.edges[he.edgeIndex]!;
+    const src = graph.vertices[he.src]!;
+    const dst = graph.vertices[he.dst]!;
+    edges.push({
+      src, dst,
+      isLine: !edge.isBridge && edge.segment.kind === "line",
+      isBridge: edge.isBridge ?? false,
+    });
+  }
+  if (edges.length === 0) return [];
+
+  // Per-edge outward normal (right of edge direction for CCW face).
+  // Only valid when the edge has positive length; degenerate edges
+  // get a zero normal (those won't contribute to a ribbon either).
+  const normals: V2d[] = edges.map((e) => {
+    const dx = e.dst.x - e.src.x, dy = e.dst.y - e.src.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-12) return new V2d(0, 0);
+    return new V2d(dy / len, -dx / len);
+  });
+
+  // Per-vertex bisector at the START of edge i, between the previous
+  // VISIBLE (non-bridge) edge's normal and edge i's normal. Bridges
+  // are skipped — at a vertex where a bridge meets a line edge, the
+  // bisector falls back to the line's own normal.
+  const N = edges.length;
+  const MITER_MIN = 0.25; // 1 / (1/0.25) = 4× miter cap.
+  const bisectorAt = (i: number): V2d => {
+    const here = edges[i]!;
+    if (!here.isLine) return new V2d(0, 0);
+    const nHere = normals[i]!;
+    // Find previous visible edge (skipping bridges).
+    let p = (i - 1 + N) % N;
+    let prevVisibleEdge: BHE | undefined;
+    let prevNormal: V2d | undefined;
+    for (let k = 0; k < N; k++) {
+      if (!edges[p]!.isBridge) { prevVisibleEdge = edges[p]; prevNormal = normals[p]; break; }
+      p = (p - 1 + N) % N;
+    }
+    if (prevVisibleEdge === undefined || prevNormal === undefined) return nHere;
+    // Only miter against another LINE; against a curve we keep the
+    // line's own normal (curves handle their own AA via implicit).
+    if (!prevVisibleEdge.isLine) return nHere;
+    const sumX = prevNormal.x + nHere.x, sumY = prevNormal.y + nHere.y;
+    const sumLen = Math.hypot(sumX, sumY);
+    if (sumLen < 1e-9) return nHere; // 180° turn; should not happen for simple polygons
+    const dirX = sumX / sumLen, dirY = sumY / sumLen;
+    const cosHalf = Math.max(dirX * nHere.x + dirY * nHere.y, MITER_MIN);
+    return new V2d(dirX / cosHalf, dirY / cosHalf);
+  };
+
+  const ribbons: RibbonTriangle[] = [];
+  for (let i = 0; i < N; i++) {
+    const e = edges[i]!;
+    if (!e.isLine) continue;
+    const bStart = bisectorAt(i);
+    const bEnd = bisectorAt((i + 1) % N);
+    // Quad vertices: A = src inner, B = dst inner, C = src outer,
+    // D = dst outer. Two CCW triangles cover (A→B→D) and (A→D→C).
+    const A = e.src, B = e.dst;
+    const C = e.src, D = e.dst;
+    ribbons.push({
+      vertices: [A, B, D],
+      outward:  [bStart, bEnd, bEnd],
+      isOuter:  [0, 0, 1],
+    });
+    ribbons.push({
+      vertices: [A, D, C],
+      outward:  [bStart, bEnd, bStart],
+      isOuter:  [0, 1, 1],
+    });
+  }
+  return ribbons;
+}
+
 function buildFacePolygon(
   face: Face, extraction: FaceExtractionResult, graph: PlanarGraph,
 ): { polygon: V2d[]; curves: CurveTriangle[] } {
@@ -301,7 +434,8 @@ export function triangulateFace(
   const flat: FlatTriangle[] = triIndices.map(([a, b, c]) => ({
     vertices: [polygon[a]!, polygon[b]!, polygon[c]!] as const,
   }));
-  return { flat, curves };
+  const ribbons = buildLineRibbons(face, extraction, graph);
+  return { flat, curves, ribbons };
 }
 
 /**
@@ -316,12 +450,14 @@ export function triangulateFilledFaces(
 ): FaceTriangulation {
   const flat: FlatTriangle[] = [];
   const curves: CurveTriangle[] = [];
+  const ribbons: RibbonTriangle[] = [];
   for (const fi of filledFaceIndices) {
     const f = extraction.faces[fi]!;
     if (f.signedArea <= 0) continue; // skip CW / outer faces
     const tri = triangulateFace(f, extraction, graph);
     flat.push(...tri.flat);
     curves.push(...tri.curves);
+    ribbons.push(...tri.ribbons);
   }
-  return { flat, curves };
+  return { flat, curves, ribbons };
 }

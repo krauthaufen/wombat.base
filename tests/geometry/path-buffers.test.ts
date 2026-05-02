@@ -5,6 +5,7 @@ import {
   tessellatePath, triangulateFilledFaces,
   compileTessellation,
   VERTEX_KIND_INTERIOR, VERTEX_KIND_BEZIER2, VERTEX_KIND_ARC,
+  VERTEX_KIND_LINE_RIBBON,
 } from "../../src/geometry/path/index.js";
 
 function readKind(vertices: Float32Array, vertexIndex: number): number {
@@ -25,17 +26,23 @@ describe("compileTessellation", () => {
     ];
   }
 
-  it("flat-only square: 2 interior triangles, 0 curve triangles", () => {
+  it("flat-only square: 2 interior triangles, 0 curve triangles, 4 line ribbons", () => {
     const r = tessellatePath(ccwSquare());
     const tri = triangulateFilledFaces(r.filledFaces, r.extraction, r.graph);
     const bufs = compileTessellation(tri);
-    expect(bufs.interiorRange.indexCount).toBe(6); // 2 triangles × 3
+    expect(bufs.interiorRange.indexCount).toBe(6);   // 2 interior triangles
     expect(bufs.curveRange.indexCount).toBe(0);
-    expect(bufs.indices.length).toBe(6);
-    // All vertices flagged as interior.
-    const vertCount = bufs.vertices.length / 6;
-    for (let i = 0; i < vertCount; i++) {
+    // 4 line edges → 4 ribbons × 2 triangles × 3 indices = 24.
+    expect(bufs.ribbonRange.indexCount).toBe(24);
+    expect(bufs.indices.length).toBe(6 + 24);
+    // First 6 vertices are interior.
+    for (let i = 0; i < 6; i++) {
       expect(readKind(bufs.vertices, i)).toBe(VERTEX_KIND_INTERIOR);
+    }
+    // The remaining 24 vertices are line ribbons.
+    const total = bufs.vertices.length / 6;
+    for (let i = 6; i < total; i++) {
+      expect(readKind(bufs.vertices, i)).toBe(VERTEX_KIND_LINE_RIBBON);
     }
   });
 

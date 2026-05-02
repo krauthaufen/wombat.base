@@ -23,15 +23,26 @@
 
 import type { FaceTriangulation } from "./triangulate.js";
 
-export const VERTEX_KIND_INTERIOR = 0;
-export const VERTEX_KIND_BEZIER2  = 1;
-export const VERTEX_KIND_ARC      = 2;
+export const VERTEX_KIND_INTERIOR     = 0;
+export const VERTEX_KIND_BEZIER2      = 1;
+export const VERTEX_KIND_ARC          = 2;
+/**
+ * Outline-ribbon vertex for AA on straight polygon edges. For these
+ * vertices the `klmKind.xyz` slot is REINTERPRETED as
+ * `(outwardX, outwardY, isOuter)` — the vertex shader expands
+ * `isOuter == 1` vertices outward by 1 framebuffer pixel along
+ * `outward` in screen space, and the fragment shader uses
+ * `1 - isOuter` as the AA alpha ramp.
+ */
+export const VERTEX_KIND_LINE_RIBBON  = 3;
 
 export const VERTEX_BYTE_SIZE = 24; // 6 × f32
 
 export interface TessellationBuffers {
-  /** Interleaved vertex data: per vertex, 5 f32 then 1 u32:
-   *  `[x, y, k, l, m, kind, …]`. */
+  /** Interleaved vertex data: per vertex, 6 f32:
+   *  `[x, y, klm.x, klm.y, klm.z, kind]`. For `kind = 3`
+   *  (line ribbon), the `klm` slot carries
+   *  `(outwardX, outwardY, isOuter)`. */
   readonly vertices: Float32Array;
   /** Index buffer: 3 indices per triangle. */
   readonly indices: Uint32Array;
@@ -39,6 +50,8 @@ export interface TessellationBuffers {
   readonly interiorRange: { firstIndex: number; indexCount: number };
   /** Range of `indices` for curve (Loop-Blinn) triangles. */
   readonly curveRange: { firstIndex: number; indexCount: number };
+  /** Range of `indices` for line-edge AA ribbon triangles. */
+  readonly ribbonRange: { firstIndex: number; indexCount: number };
   /**
    * For each curve triangle (in their order in `indices`), whether
    * the curve bulges outward from its chord. The renderer needs this
@@ -55,10 +68,11 @@ export interface TessellationBuffers {
 export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
   const flatTriCount = t.flat.length;
   const curveTriCount = t.curves.length;
-  const totalTriCount = flatTriCount + curveTriCount;
+  const ribbonTriCount = t.ribbons.length;
+  const totalTriCount = flatTriCount + curveTriCount + ribbonTriCount;
   const totalVertCount = totalTriCount * 3;
 
-  const vertices = new Float32Array(totalVertCount * 6); // x, y, k, l, m, kind
+  const vertices = new Float32Array(totalVertCount * 6); // x, y, klm.x, klm.y, klm.z, kind
   const indices = new Uint32Array(totalTriCount * 3);
   const curveBulgeOutward = new Uint8Array(curveTriCount);
 
@@ -104,11 +118,33 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
   }
   const curveIndexCount = ii - interiorIndexCount;
 
+  // ---- Line-edge AA ribbon triangles ----
+  // klm slot is reinterpreted as (outwardX, outwardY, isOuter); the
+  // vertex shader uses these to expand `isOuter` vertices by 1 px in
+  // screen space along `outward` (in NDC), and the fragment shader
+  // uses `1 - isOuter` as the linear AA ramp.
+  for (const tri of t.ribbons) {
+    for (let k = 0; k < 3; k++) {
+      const p = tri.vertices[k]!;
+      const o = tri.outward[k]!;
+      vertices[vi + 0] = p.x;
+      vertices[vi + 1] = p.y;
+      vertices[vi + 2] = o.x;
+      vertices[vi + 3] = o.y;
+      vertices[vi + 4] = tri.isOuter[k]!;
+      vertices[vi + 5] = VERTEX_KIND_LINE_RIBBON;
+      vi += 6;
+      indices[ii++] = nextIdx++;
+    }
+  }
+  const ribbonIndexCount = ii - interiorIndexCount - curveIndexCount;
+
   return {
     vertices,
     indices,
-    interiorRange: { firstIndex: 0, indexCount: interiorIndexCount },
-    curveRange: { firstIndex: interiorIndexCount, indexCount: curveIndexCount },
+    interiorRange: { firstIndex: 0,                                     indexCount: interiorIndexCount },
+    curveRange:    { firstIndex: interiorIndexCount,                    indexCount: curveIndexCount },
+    ribbonRange:   { firstIndex: interiorIndexCount + curveIndexCount,  indexCount: ribbonIndexCount },
     curveBulgeOutward,
   };
 }

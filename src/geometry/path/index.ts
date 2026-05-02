@@ -40,6 +40,7 @@ export {
 } from "./loop-blinn.js";
 export {
   type FlatTriangle,
+  type RibbonTriangle,
   type FaceTriangulation,
   earClip,
   triangulateFace,
@@ -51,5 +52,6 @@ export {
   VERTEX_KIND_INTERIOR,
   VERTEX_KIND_BEZIER2,
   VERTEX_KIND_ARC,
+  VERTEX_KIND_LINE_RIBBON,
   VERTEX_BYTE_SIZE,
 } from "./buffers.js";
