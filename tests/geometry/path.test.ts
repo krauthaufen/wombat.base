@@ -194,8 +194,8 @@ describe("ArcSegment", () => {
   it("rotated ellipse arc — bounds, length", () => {
     // Quarter ellipse rx=2, ry=1, rotated 30°, centred at (3,4).
     const rho = Math.PI / 6;
-    const a = new ArcSegment(
-      new V2d(3, 4), new V2d(2, 1), rho, 0, Math.PI / 2,
+    const a = ArcSegment.fromRadiiRotation(
+      new V2d(3, 4), 2, 1, rho, 0, Math.PI / 2,
     );
     // Length agrees with numerical reference (incomplete elliptic
     // integral of the second kind, computed via direct quadrature).
@@ -245,8 +245,8 @@ describe("ArcSegment", () => {
   });
 
   it("eccentric arc — signedAreaTerm matches numeric reference", () => {
-    const a = new ArcSegment(
-      new V2d(3, 4), new V2d(2, 1), Math.PI / 6, 0.3, 1.4,
+    const a = ArcSegment.fromRadiiRotation(
+      new V2d(3, 4), 2, 1, Math.PI / 6, 0.3, 1.4,
     );
     const ref = 0.5 * integrate(t => {
       const p = a.eval(t);

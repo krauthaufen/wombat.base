@@ -277,64 +277,85 @@ export class Bezier3Segment {
 // ---------------------------------------------------------------------------
 
 /**
- * Elliptic arc parametrised by:
- *   - centre `c`
- *   - radii `(rx, ry)` (positive, before rotation)
- *   - `rotation` of the major axis from +x, in radians
- *   - `startAngle` θ₀ in the unrotated ellipse frame, radians
- *   - `deltaAngle` Δθ — signed sweep (positive ccw); |Δθ| typically ≤ 2π
+ * Elliptic arc, parametrised the same way Aardvark.Rendering.Text /
+ * Aardvark.Base.Ellipse2d does:
+ *   - `center`
+ *   - two semi-axis vectors `axis0`, `axis1` (each carries direction
+ *     AND magnitude, so rotation + radii are baked in together)
+ *   - `startAngle` θ₀ (in the ellipse's parametric frame, radians)
+ *   - `deltaAngle` Δθ — signed sweep (positive ccw)
  *
- * P(t) = c + R(ρ) · (rx cos θ, ry sin θ)  where  θ = θ₀ + t·Δθ
+ * P(t) = center + cos(θ) · axis0 + sin(θ) · axis1   where θ = θ₀ + t·Δθ
  *
- * Storing native ellipse params (rather than SVG endpoint params) keeps
- * every downstream pass — intersection, length, area, triangulation —
- * working on the actual curve, not a polyline / Bezier approximation.
+ * `axis0` and `axis1` are normally orthogonal (the standard semi-axes),
+ * but the math also works for any pair of independent vectors — every
+ * downstream pass treats them as raw vectors, not a (radii, rotation)
+ * pair, which keeps intersection / bounds / area code free of separate
+ * rotation matrices.
  */
 export class ArcSegment {
   readonly kind = "arc" as const;
   readonly center: V2d;
-  readonly radii: V2d;
-  readonly rotation: number;
+  readonly axis0: V2d;
+  readonly axis1: V2d;
   readonly startAngle: number;
   readonly deltaAngle: number;
 
   constructor(
     center: V2d,
-    radii: V2d,
-    rotation: number,
+    axis0: V2d,
+    axis1: V2d,
     startAngle: number,
     deltaAngle: number,
   ) {
     this.center = center;
-    this.radii = radii;
-    this.rotation = rotation;
+    this.axis0 = axis0;
+    this.axis1 = axis1;
     this.startAngle = startAngle;
     this.deltaAngle = deltaAngle;
   }
 
-  /** Construct a circular arc (rx = ry = radius, rotation irrelevant). */
+  /** Circular arc, axis-aligned parametric frame. */
   static circular(
     center: V2d, radius: number, startAngle: number, deltaAngle: number,
   ): ArcSegment {
-    return new ArcSegment(center, new V2d(radius, radius), 0, startAngle, deltaAngle);
+    return new ArcSegment(
+      center, new V2d(radius, 0), new V2d(0, radius), startAngle, deltaAngle,
+    );
+  }
+
+  /**
+   * Axis-aligned-then-rotated ellipse arc with explicit semi-axes
+   * `(rx, ry)` and a rotation angle of the rx-axis from +x.
+   */
+  static fromRadiiRotation(
+    center: V2d, rx: number, ry: number, rotation: number,
+    startAngle: number, deltaAngle: number,
+  ): ArcSegment {
+    const c = Math.cos(rotation), s = Math.sin(rotation);
+    return new ArcSegment(
+      center,
+      new V2d(rx * c, rx * s),
+      new V2d(-ry * s, ry * c),
+      startAngle, deltaAngle,
+    );
   }
 
   private pointAt(theta: number): V2d {
-    const cr = Math.cos(this.rotation), sr = Math.sin(this.rotation);
-    const ux = this.radii.x * Math.cos(theta);
-    const uy = this.radii.y * Math.sin(theta);
+    const c = Math.cos(theta), s = Math.sin(theta);
     return new V2d(
-      this.center.x + ux * cr - uy * sr,
-      this.center.y + ux * sr + uy * cr,
+      this.center.x + c * this.axis0.x + s * this.axis1.x,
+      this.center.y + c * this.axis0.y + s * this.axis1.y,
     );
   }
 
   private tangentAt(theta: number): V2d {
-    // dP/dθ in world frame.
-    const cr = Math.cos(this.rotation), sr = Math.sin(this.rotation);
-    const dux = -this.radii.x * Math.sin(theta);
-    const duy = this.radii.y * Math.cos(theta);
-    return new V2d(dux * cr - duy * sr, dux * sr + duy * cr);
+    // dP/dθ = -sin θ · axis0 + cos θ · axis1
+    const c = Math.cos(theta), s = Math.sin(theta);
+    return new V2d(
+      -s * this.axis0.x + c * this.axis1.x,
+      -s * this.axis0.y + c * this.axis1.y,
+    );
   }
 
   get start(): V2d { return this.pointAt(this.startAngle); }
@@ -349,29 +370,25 @@ export class ArcSegment {
   }
 
   bounds(): Box2d {
-    // Extrema of x(θ) and y(θ) within [θ₀, θ₀+Δθ].
-    //   dx/dθ = 0  =>  tan θ = -(ry/rx) tan ρ
-    //   dy/dθ = 0  =>  tan θ =  (ry/rx) cot ρ
-    // Each gives a θ in (-π, π] modulo π — collect both copies plus
-    // their +2kπ shifts that lie within the arc range.
+    // Extrema of x(θ) = cx + cos θ · axis0.x + sin θ · axis1.x
+    //   dx/dθ = -sin θ · axis0.x + cos θ · axis1.x = 0
+    //     => tan θ = axis1.x / axis0.x  (one solution mod π)
+    // Likewise for y. Collect both candidates plus their +π shifts,
+    // then their +2kπ images falling inside the arc range.
     const pts: V2d[] = [this.start, this.end];
-    const cr = Math.cos(this.rotation), sr = Math.sin(this.rotation);
-    const rx = this.radii.x, ry = this.radii.y;
-    const thetaX = Math.atan2(-ry * sr, rx * cr);
-    const thetaY = Math.atan2(ry * cr, rx * sr);
+    const thetaX = Math.atan2(this.axis1.x, this.axis0.x);
+    const thetaY = Math.atan2(this.axis1.y, this.axis0.y);
     const lo = this.deltaAngle >= 0 ? this.startAngle : this.startAngle + this.deltaAngle;
     const hi = this.deltaAngle >= 0 ? this.startAngle + this.deltaAngle : this.startAngle;
     const candidates = [thetaX, thetaX + Math.PI, thetaY, thetaY + Math.PI];
     for (const c of candidates) {
-      // Shift c by 2π to land in [lo, hi] if possible.
-      const span = hi - lo;
-      let k = Math.ceil((lo - c) / (2 * Math.PI));
-      let theta = c + 2 * Math.PI * k;
-      while (theta <= hi + 1e-15) {
-        if (theta >= lo - 1e-15 && span >= 0) pts.push(this.pointAt(theta));
+      const k0 = Math.ceil((lo - c) / (2 * Math.PI));
+      let theta = c + 2 * Math.PI * k0;
+      let k = 0;
+      while (theta <= hi + 1e-15 && k < 16) {
+        if (theta >= lo - 1e-15) pts.push(this.pointAt(theta));
         theta += 2 * Math.PI;
         k += 1;
-        if (k > 10) break; // safety
       }
     }
     return Box2d.fromPoints(pts);
@@ -380,27 +397,30 @@ export class ArcSegment {
   split(t: number): [ArcSegment, ArcSegment] {
     const mid = t * this.deltaAngle;
     return [
-      new ArcSegment(this.center, this.radii, this.rotation, this.startAngle, mid),
-      new ArcSegment(this.center, this.radii, this.rotation, this.startAngle + mid, this.deltaAngle - mid),
+      new ArcSegment(this.center, this.axis0, this.axis1, this.startAngle, mid),
+      new ArcSegment(this.center, this.axis0, this.axis1, this.startAngle + mid, this.deltaAngle - mid),
     ];
   }
 
   reverse(): ArcSegment {
     return new ArcSegment(
-      this.center, this.radii, this.rotation,
+      this.center, this.axis0, this.axis1,
       this.startAngle + this.deltaAngle,
       -this.deltaAngle,
     );
   }
 
   length(): number {
-    const rx = this.radii.x, ry = this.radii.y;
-    if (rx === ry) return rx * Math.abs(this.deltaAngle);
-    // ∫|dP/dθ| dθ = ∫ sqrt(rx² sin²θ + ry² cos²θ) dθ.
-    // (Rotation `ρ` is an isometry, so it drops out of the integrand.)
+    // |dP/dθ|² = sin²θ |axis0|² - 2 sinθ cosθ (axis0·axis1) + cos²θ |axis1|²
+    const a0 = this.axis0, a1 = this.axis1;
+    const aa = a0.dot(a0), ab = a0.dot(a1), bb = a1.dot(a1);
+    if (Math.abs(aa - bb) < 1e-15 && Math.abs(ab) < 1e-15) {
+      // Circular case — closed form.
+      return Math.sqrt(aa) * Math.abs(this.deltaAngle);
+    }
     const f = (theta: number): number => {
       const s = Math.sin(theta), c = Math.cos(theta);
-      return Math.sqrt(rx * rx * s * s + ry * ry * c * c);
+      return Math.sqrt(s * s * aa - 2 * s * c * ab + c * c * bb);
     };
     const a = this.startAngle;
     const b = this.startAngle + this.deltaAngle;
@@ -408,17 +428,18 @@ export class ArcSegment {
   }
 
   signedAreaTerm(): number {
-    // (1/2) ∫(x dy - y dx) along the arc.
-    // Decompose P = c + Δ(θ) where Δ is the centred ellipse evaluation.
-    //   ∫ x dy = cx (y_end - y_start) + ∫ Δx · dΔy/dθ dθ
-    //   ∫ y dx = cy (x_end - x_start) + ∫ Δy · dΔx/dθ dθ
-    // The centred-frame piece simplifies: rotation is an isometry, so
-    //   ∫ (Δx dΔy - Δy dΔx)/dθ dθ = rx · ry · Δθ.
+    // (1/2) ∫(x dy - y dx) along the arc. Decompose P = center + Δ(θ).
+    //   ∫(x dy - y dx) = cx(y_end - y_start) - cy(x_end - x_start)
+    //                  + ∫(Δx · dΔy/dθ - Δy · dΔx/dθ) dθ
+    // Expanding the centred piece in (axis0, axis1) collapses to a
+    // constant: (axis0 × axis1) · dθ. Integral over Δθ is therefore
+    // (axis0.x · axis1.y - axis0.y · axis1.x) · Δθ.
     const s = this.start, e = this.end;
+    const cross = this.axis0.x * this.axis1.y - this.axis0.y * this.axis1.x;
     return 0.5 * (
       this.center.x * (e.y - s.y)
       - this.center.y * (e.x - s.x)
-      + this.radii.x * this.radii.y * this.deltaAngle
+      + cross * this.deltaAngle
     );
   }
 }
