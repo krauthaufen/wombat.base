@@ -44,3 +44,11 @@ export {
   triangulateFace,
   triangulateFilledFaces,
 } from "./triangulate.js";
+export {
+  type TessellationBuffers,
+  compileTessellation,
+  VERTEX_KIND_INTERIOR,
+  VERTEX_KIND_BEZIER2,
+  VERTEX_KIND_ARC,
+  VERTEX_BYTE_SIZE,
+} from "./buffers.js";
