@@ -35,6 +35,7 @@ export {
   classifyArc,
   classifyBezier3,
   classifyCurve,
+  chordPoints,
   cubicToQuadratics,
 } from "./loop-blinn.js";
 export {

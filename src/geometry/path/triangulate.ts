@@ -30,6 +30,7 @@ import type {
 import {
   type CurveTriangle,
   classifyCurve,
+  chordPoints,
 } from "./loop-blinn.js";
 
 export interface FlatTriangle {
@@ -189,24 +190,99 @@ export function earClip(
  * polygon but do NOT emit curve triangles — they're invisible to
  * the renderer.
  */
+// Even-odd ray-cast: is `p` inside the closed simple polygon `poly`?
+// Used as the per-face "containsPoint nonCurved p1" decision (mirrors
+// Aardvark.Rendering.Text), driving the m-component sign on each
+// curve triangle and the polygon-detour through inward control
+// points.
+function pointInsidePolygon(p: V2d, poly: ReadonlyArray<V2d>): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]!, b = poly[j]!;
+    if (((a.y > p.y) !== (b.y > p.y))
+        && (p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+const flipM = (
+  t: readonly [number, number, number],
+): readonly [number, number, number] => [t[0], t[1], -t[2]];
+
+/**
+ * Mirror of Aardvark.Rendering.Text's PathTessellator. The flat
+ * polygon for each face is built from the segment-endpoint chord
+ * polyline plus, for every Loop-Blinn curve sub-triangle whose
+ * "extra" vertex (bez2 control / arc apex / cubic hull-vertex) lies
+ * INSIDE that chord polyline, an extra detour through that vertex.
+ * Those curves emit with `m = -1` so the fragment test
+ * `(f * m) > 0 → discard` cancels the over-coverage that the detour
+ * introduces. Curves whose extra vertex stays OUTSIDE the chord
+ * polyline are kept as-is (chord on the polygon, `m = 1`, curve adds
+ * the bulge to the polygon).
+ *
+ * The two-pass shape (chord polyline first, detoured polygon second)
+ * is what lets inner contours that arrive via Stage 3.5 bridges
+ * subtract correctly: curves on the inner outline have their control
+ * point inside the bridged chord polyline (= inside the outer-minus-
+ * inner region), so they detour + flip to `m = -1` and the bulge
+ * region of the inner outline is excluded from the final fill.
+ */
 function buildFacePolygon(
   face: Face, extraction: FaceExtractionResult, graph: PlanarGraph,
 ): { polygon: V2d[]; curves: CurveTriangle[] } {
+  // Pass 1: chord polyline including sub-piece break points (arc
+  // pieces, cubic-to-quadratic splits). This is the reference
+  // polygon for the per-curve "extra vertex inside polygon?" test;
+  // it follows the curve at sub-piece resolution but uses straight
+  // chords within each sub-piece.
+  const chordPolygon: V2d[] = [];
+  for (const heIdx of face.halfEdges) {
+    const he = extraction.halfEdges[heIdx]!;
+    const edge = graph.edges[he.edgeIndex]!;
+    chordPolygon.push(graph.vertices[he.src]!);
+    if (edge.isBridge) continue;
+    const segOriented = he.reversed ? edge.segment.reverse() : edge.segment;
+    for (const p of chordPoints(segOriented)) chordPolygon.push(p);
+  }
+
+  // Pass 2: build the final polygon (with control-detour spikes for
+  // sub-pieces whose "extra" vertex lies inside the chord polygon)
+  // and emit curve triangles. Curves whose extra is INSIDE flip
+  // their `m` to −1 so the fragment test `(f * m) > 0 → discard`
+  // cancels coverage that the detour over-introduces.
   const polygon: V2d[] = [];
   const curves: CurveTriangle[] = [];
   for (const heIdx of face.halfEdges) {
     const he = extraction.halfEdges[heIdx]!;
     const edge = graph.edges[he.edgeIndex]!;
-    // The polygon's vertex at this half-edge is `he.src`'s position.
     polygon.push(graph.vertices[he.src]!);
-    // Bridges don't produce curves and aren't part of the rendered
-    // outline; skip their classification.
     if (edge.isBridge) continue;
-    // For a forward half-edge we use the segment as-is; for reversed
-    // we flip via `seg.reverse()` before classifying so the curve
-    // triangle's vertex order matches the face traversal.
     const segOriented = he.reversed ? edge.segment.reverse() : edge.segment;
-    for (const ct of classifyCurve(segOriented)) curves.push(ct);
+    const breaks = chordPoints(segOriented);
+    const subTriangles = classifyCurve(segOriented);
+    // Sub-pieces and break-points correspond 1:1: sub-piece i ends at
+    // breaks[i] (for i < N-1); the last sub-piece ends at the segment
+    // end (already pushed by the next half-edge's src).
+    for (let i = 0; i < subTriangles.length; i++) {
+      const ct = subTriangles[i]!;
+      const extra = ct.vertices[1]!;
+      const inside = pointInsidePolygon(extra, chordPolygon);
+      if (inside) {
+        polygon.push(extra);
+        curves.push({
+          ...ct,
+          texcoords: [flipM(ct.texcoords[0]), flipM(ct.texcoords[1]), flipM(ct.texcoords[2])],
+        });
+      } else {
+        curves.push(ct);
+      }
+      // Break-point between sub-piece i and i+1 (always a polygon
+      // vertex, since it lies on the actual curve).
+      if (i < breaks.length) polygon.push(breaks[i]!);
+    }
   }
   return { polygon, curves };
 }

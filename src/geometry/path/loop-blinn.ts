@@ -268,3 +268,40 @@ export function classifyCurve(seg: PathSegment): CurveTriangle[] {
     case "bezier3": return classifyBezier3(seg);
   }
 }
+
+/**
+ * Intermediate chord points along a curve segment — the sub-piece
+ * boundaries introduced by classifyArc / cubicToQuadratics. Excludes
+ * the segment's own start and end (those are already polygon vertices
+ * via the planar graph). Used by the chord-polygon builder so the
+ * ear-clipper has more than just `[start, end]` to work with for
+ * 2-segment closed contours (e.g. a leaf or a circle).
+ *
+ * Lines and single-piece bezier2s contribute nothing here.
+ */
+export function chordPoints(seg: PathSegment): V2d[] {
+  switch (seg.kind) {
+    case "line":
+    case "bezier2":
+      return [];
+    case "bezier3": {
+      const pieces = cubicToQuadratics(seg);
+      const out: V2d[] = [];
+      for (let i = 0; i < pieces.length - 1; i++) out.push(pieces[i]!.end);
+      return out;
+    }
+    case "arc": {
+      const total = seg.deltaAngle;
+      const pieces = Math.max(1, Math.ceil(Math.abs(total) / MAX_ARC_PIECE));
+      if (pieces === 1) return [];
+      const step = total / pieces;
+      const out: V2d[] = [];
+      for (let i = 1; i < pieces; i++) {
+        const t = seg.startAngle + i * step;
+        const local = new V2d(Math.cos(t), Math.sin(t));
+        out.push(localToWorld(seg, local));
+      }
+      return out;
+    }
+  }
+}
