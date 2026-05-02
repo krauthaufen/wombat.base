@@ -28,3 +28,11 @@ export {
 } from "./components.js";
 export { connectComponents } from "./bridge.js";
 export { tessellatePath, type TessellationResult } from "./tessellate.js";
+export {
+  type CurveTriangle,
+  type CurveTriangleKind,
+  classifyBezier2,
+  classifyArc,
+  classifyBezier3,
+  classifyCurve,
+} from "./loop-blinn.js";
