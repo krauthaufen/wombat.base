@@ -20,3 +20,4 @@ export {
   extractFaces,
 } from "./face-extract.js";
 export { computeWindings, filledFaceIndices } from "./winding.js";
+export { type FillRule, FillRules } from "./fill-rule.js";

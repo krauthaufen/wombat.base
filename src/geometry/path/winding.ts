@@ -35,6 +35,7 @@ import type {
   Face, FaceExtractionResult, HalfEdge,
 } from "./face-extract.js";
 import type { PlanarGraph } from "./planar-graph.js";
+import { type FillRule, FillRules } from "./fill-rule.js";
 
 const T_EPS = 1e-9;
 
@@ -220,12 +221,18 @@ export function computeWindings(
   return result;
 }
 
-/** Indices of faces with winding ≠ 0 under the non-zero rule. */
+/**
+ * Indices of faces inside the filled region under the supplied fill
+ * rule (defaults to non-zero). Pass `FillRules.evenOdd`,
+ * `FillRules.positive`, etc., or any user-defined predicate.
+ */
 export function filledFaceIndices(
-  extraction: FaceExtractionResult, graph: PlanarGraph,
+  extraction: FaceExtractionResult,
+  graph: PlanarGraph,
+  rule: FillRule = FillRules.nonZero,
 ): number[] {
   const w = computeWindings(extraction, graph);
   const out: number[] = [];
-  for (let i = 0; i < w.length; i++) if (w[i]! !== 0) out.push(i);
+  for (let i = 0; i < w.length; i++) if (rule(w[i]!)) out.push(i);
   return out;
 }
