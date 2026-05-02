@@ -12,3 +12,11 @@ export {
   pathFromGlyph,
   pathFromGlyphCommands,
 } from "./glyph-path.js";
+export {
+  type ShapedGlyph,
+  type LayoutResult,
+  type LayoutOptions,
+  layoutText,
+  segmentsFromLayout,
+  textToSegments,
+} from "./layout.js";
