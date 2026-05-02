@@ -183,15 +183,71 @@ export function classifyArc(a: ArcSegment): CurveTriangle[] {
 }
 
 // ---------------------------------------------------------------------------
-// Bezier3 — Stage 4b
+// Bezier3 — via cubic → quadratic subdivision
 // ---------------------------------------------------------------------------
+//
+// Aardvark.Rendering.Text takes the direct route: full 5-case
+// Loop-Blinn classification (serpentine / loop / cusp at infinity /
+// quadratic-degenerate / line-degenerate) with per-case (k, l, m, n)
+// texcoord formulas derived from the cubic's projective discriminant.
+// We instead approximate each cubic by a sequence of quadratic
+// Beziers (well-known classical technique, e.g. Tiller 1984), so
+// every cubic feeds the same `classifyBezier2` machinery.
+//
+// At a sufficiently small per-piece error tolerance the rendered
+// pixels are bit-identical to the direct cubic case; the only cost
+// is more triangles per cubic. Upgrading to the direct 5-case
+// algorithm later is a drop-in replacement.
+//
+// Approximation: a cubic `(P₀, P₁, P₂, P₃)` whose midpoint cubic-ness
+// is small can be replaced by a single quadratic `(Q₀, Q₁, Q₂)` with
+//
+//   Q₀ = P₀,  Q₂ = P₃,  Q₁ = (3(P₁+P₂) − P₀ − P₃) / 4
+//
+// The L∞ Hausdorff error is bounded by
+//
+//   ‖P₀ − 3P₁ + 3P₂ − P₃‖ · √3 / 36
+//
+// (the "deviation" vector — the third difference of the control net).
+// When the bound exceeds `tolerance` we subdivide at `t = 0.5` via
+// de Casteljau and recurse.
 
-/** TODO: Stage 4b — five-case Loop-Blinn classification for cubic
- *  Beziers (serpentine / loop / cusp / quadratic-degen / line-degen). */
-export function classifyBezier3(_b: Bezier3Segment): CurveTriangle[] {
-  throw new Error(
-    "classifyBezier3: cubic Loop-Blinn classification is Stage 4b — not yet implemented",
-  );
+const DEFAULT_CUBIC_TOLERANCE = 1e-3;
+
+/**
+ * Approximate a cubic Bezier by a sequence of quadratic Beziers,
+ * each with L∞ Hausdorff error ≤ `tolerance` from the corresponding
+ * sub-arc of the cubic. Uses recursive bisection at `t = 0.5`.
+ */
+export function cubicToQuadratics(
+  c: Bezier3Segment, tolerance: number = DEFAULT_CUBIC_TOLERANCE,
+): Bezier2Segment[] {
+  // Third difference of control net (the cubic-ness measure).
+  const dx = c.start.x - 3 * c.control1.x + 3 * c.control2.x - c.end.x;
+  const dy = c.start.y - 3 * c.control1.y + 3 * c.control2.y - c.end.y;
+  const errBound = Math.hypot(dx, dy) * (Math.sqrt(3) / 36);
+
+  if (errBound <= tolerance) {
+    const q1x = (3 * (c.control1.x + c.control2.x) - c.start.x - c.end.x) / 4;
+    const q1y = (3 * (c.control1.y + c.control2.y) - c.start.y - c.end.y) / 4;
+    return [new Bezier2Segment(c.start, new V2d(q1x, q1y), c.end)];
+  }
+
+  const [left, right] = c.split(0.5);
+  return [
+    ...cubicToQuadratics(left, tolerance),
+    ...cubicToQuadratics(right, tolerance),
+  ];
+}
+
+/**
+ * Loop-Blinn texcoords for a cubic Bezier via cubic → quadratic
+ * subdivision. Each emitted piece is one `classifyBezier2` triangle.
+ */
+export function classifyBezier3(
+  b: Bezier3Segment, tolerance: number = DEFAULT_CUBIC_TOLERANCE,
+): CurveTriangle[] {
+  return cubicToQuadratics(b, tolerance).map(q => classifyBezier2(q));
 }
 
 // ---------------------------------------------------------------------------

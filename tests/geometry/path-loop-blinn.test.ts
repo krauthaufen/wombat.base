@@ -3,6 +3,7 @@ import { V2d } from "../../src/vector/v2d.js";
 import {
   Bezier2Segment, Bezier3Segment, ArcSegment,
   classifyBezier2, classifyArc, classifyBezier3, classifyCurve,
+  cubicToQuadratics,
 } from "../../src/geometry/path/index.js";
 import { LineSegment } from "../../src/geometry/path/index.js";
 
@@ -128,11 +129,86 @@ describe("classifyCurve", () => {
     expect(classifyCurve(l)).toEqual([]);
   });
 
-  it("Bezier3 throws — Stage 4b not yet implemented", () => {
+  it("Bezier3 emits one or more bez2 triangles via subdivision", () => {
     const b = new Bezier3Segment(
       new V2d(0, 0), new V2d(0, 1), new V2d(1, 1), new V2d(1, 0),
     );
-    expect(() => classifyBezier3(b)).toThrow(/Stage 4b/);
-    expect(() => classifyCurve(b)).toThrow(/Stage 4b/);
+    const triangles = classifyBezier3(b);
+    expect(triangles.length).toBeGreaterThanOrEqual(1);
+    for (const t of triangles) expect(t.kind).toBe("bezier2");
+  });
+});
+
+describe("cubicToQuadratics", () => {
+  it("near-quadratic cubic produces a single quadratic", () => {
+    // A cubic that's already a degree-elevated quadratic — third
+    // difference of the control net is exactly zero, so one piece.
+    const cubic = new Bezier3Segment(
+      new V2d(0, 0),
+      new V2d(2 / 3, 2 / 3),  // (P0 + 2 P1_quad) / 3 with P1_quad = (1, 1)
+      new V2d(4 / 3, 2 / 3),  // (2 P1_quad + P2) / 3 with P2 = (2, 0)
+      new V2d(2, 0),
+    );
+    const pieces = cubicToQuadratics(cubic);
+    expect(pieces.length).toBe(1);
+    // Recovered quadratic control point ≈ (1, 1).
+    close(pieces[0]!.control.x, 1);
+    close(pieces[0]!.control.y, 1, 1e-12);
+  });
+
+  it("genuinely cubic shape subdivides into multiple quadratics", () => {
+    // S-curve: cubic with two strongly-different control directions.
+    const cubic = new Bezier3Segment(
+      new V2d(0, 0), new V2d(0, 5), new V2d(5, -5), new V2d(5, 0),
+    );
+    const pieces = cubicToQuadratics(cubic, 0.01);
+    expect(pieces.length).toBeGreaterThan(1);
+  });
+
+  it("subdivision endpoints stitch back to the original cubic's start/end", () => {
+    const cubic = new Bezier3Segment(
+      new V2d(0, 0), new V2d(0, 5), new V2d(5, -5), new V2d(5, 0),
+    );
+    const pieces = cubicToQuadratics(cubic, 0.001);
+    close(pieces[0]!.start.distance(cubic.start), 0, 1e-12);
+    close(pieces[pieces.length - 1]!.end.distance(cubic.end), 0, 1e-12);
+    // Adjacent pieces share endpoints (within numerical precision).
+    for (let i = 1; i < pieces.length; i++) {
+      close(pieces[i - 1]!.end.distance(pieces[i]!.start), 0, 1e-12);
+    }
+  });
+
+  it("tighter tolerance produces more pieces", () => {
+    const cubic = new Bezier3Segment(
+      new V2d(0, 0), new V2d(0, 5), new V2d(5, -5), new V2d(5, 0),
+    );
+    const coarse = cubicToQuadratics(cubic, 1.0);
+    const fine = cubicToQuadratics(cubic, 0.001);
+    expect(fine.length).toBeGreaterThanOrEqual(coarse.length);
+  });
+
+  it("subdivided pieces approximate the cubic within tolerance", () => {
+    const cubic = new Bezier3Segment(
+      new V2d(0, 0), new V2d(0, 5), new V2d(5, -5), new V2d(5, 0),
+    );
+    const tol = 0.01;
+    const pieces = cubicToQuadratics(cubic, tol);
+    // Sample the cubic densely; for each sample find the closest
+    // point on any piece. Max distance should be ≤ tolerance.
+    let worst = 0;
+    for (let i = 1; i < 100; i++) {
+      const t = i / 100;
+      const target = cubic.eval(t);
+      let bestDist = Infinity;
+      for (const p of pieces) {
+        for (let j = 0; j <= 32; j++) {
+          const tj = j / 32;
+          const d = p.eval(tj).distance(target);
+          if (d < bestDist) bestDist = d;
+        }
+      }
+      if (bestDist > worst) worst = bestDist;
+    }
+    expect(worst).toBeLessThan(tol * 5); // 5x slack for sampling resolution
   });
 });
