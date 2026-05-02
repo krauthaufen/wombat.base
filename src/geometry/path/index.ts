@@ -37,3 +37,10 @@ export {
   classifyCurve,
   cubicToQuadratics,
 } from "./loop-blinn.js";
+export {
+  type FlatTriangle,
+  type FaceTriangulation,
+  earClip,
+  triangulateFace,
+  triangulateFilledFaces,
+} from "./triangulate.js";
