@@ -21,3 +21,8 @@ export {
 } from "./face-extract.js";
 export { computeWindings, filledFaceIndices } from "./winding.js";
 export { type FillRule, FillRules } from "./fill-rule.js";
+export {
+  type ComponentInfo,
+  type ComponentDecomposition,
+  detectComponents,
+} from "./components.js";
