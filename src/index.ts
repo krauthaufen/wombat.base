@@ -106,6 +106,8 @@ export { Quad2d } from "./geometry/quad2d.js";
 export { Quad3d } from "./geometry/quad3d.js";
 export { Polygon2d } from "./geometry/polygon2d.js";
 export { Polygon3d } from "./geometry/polygon3d.js";
+export { Cylinder3d } from "./geometry/cylinder3d.js";
+export { Cone3d } from "./geometry/cone3d.js";
 export {
   type IIntersectable,
   type IIntersectHit,
@@ -117,6 +119,9 @@ export {
   type BvhHit,
   BVH_SPLIT_LIMIT,
 } from "./geometry/bvh.js";
+
+// Numerics
+export { Polynomial } from "./numerics/polynomial.js";
 
 // Spatial cells
 export { Cell } from "./cell/cell.js";

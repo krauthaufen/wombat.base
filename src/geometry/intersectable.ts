@@ -3,13 +3,18 @@
 // reports the first hit (smallest t in [tmin, tmax]) along with the
 // world-space point and outward unit normal.
 
+import { V2d } from "../vector/v2d.js";
 import { V3d } from "../vector/v3d.js";
+import { Box2d } from "../box/box2d.js";
 import { Box3d } from "../box/box3d.js";
 import { Sphere3d } from "./sphere3d.js";
 import { Triangle3d } from "./triangle3d.js";
 import { Quad3d } from "./quad3d.js";
 import { Ray3d } from "./ray3d.js";
 import { Trafo3d } from "../trafo/trafo3d.js";
+import { Cylinder3d } from "./cylinder3d.js";
+import { Cone3d } from "./cone3d.js";
+import { Polynomial } from "../numerics/polynomial.js";
 
 export interface IIntersectHit {
   /** Ray parameter (t) of the hit. */
@@ -328,6 +333,229 @@ function transposedTransformDir(m: { _data: Float64Array }, v: V3d): V3d {
   );
 }
 
+// ---------- shared helpers (cylinder / cone) ----------
+
+/**
+ * Quadratic real-root helper used by the cylinder / cone intersectables.
+ * Routes through `Polynomial.realRootsOf` (so the b-sign-aware variant
+ * applies) and then post-processes the result to match the previous
+ * inline behavior:
+ *   - sorts so `t0 <= t1`,
+ *   - duplicates the single linear root when `a` is tiny but `b` isn't
+ *     (the inline helper used `[t, t]`; both slots are independently
+ *     filtered downstream so this stays consistent).
+ */
+function sortedQuadraticRoots(a: number, b: number, c: number): [number, number] {
+  const r = Polynomial.realRootsOf(a, b, c);
+  let t0 = r[0], t1 = r[1];
+  // Linear-fallback case: `[-c/b, NaN]` from the polynomial helper.
+  // Mirror the previous `[t, t]` so both slots filter identically.
+  if (!Number.isNaN(t0) && Number.isNaN(t1)) t1 = t0;
+  if (Number.isNaN(t0)) return [t1, t0];
+  return t0 <= t1 ? [t0, t1] : [t1, t0];
+}
+
+/** True when |x| is below `~1e-16`-ish tolerance — matches Aardvark `Fun.IsTiny`. */
+function isTiny(x: number): boolean { return Math.abs(x) < 1e-16; }
+
+// ---------- cylinder ----------
+
+class CylinderIntersectable implements IIntersectable {
+  readonly boundingBox: Box3d;
+  private readonly toCylinder: Trafo3d;
+  constructor(cyl: Cylinder3d) {
+    const d = cyl.p1.sub(cyl.p0);
+    const h = d.length();
+    // Map the canonical unit cylinder (radius 1, z in [0,h]) into world.
+    // Order matches the F# `Trafo3d.Scale * Trafo3d.RotateInto * Trafo3d.Translation`,
+    // which under the wombat left-to-right convention reads as:
+    // first scale, then rotate +Z onto the cylinder axis, then translate to p0.
+    const axis = h === 0 ? V3d.unitZ : d.mul(1 / h);
+    this.toCylinder = Trafo3d.scaling(new V3d(cyl.radius, cyl.radius, h))
+      .mul(Trafo3d.rotateInto(V3d.unitZ, axis))
+      .mul(Trafo3d.translation(cyl.p0));
+    this.boundingBox = cyl.boundingBox;
+  }
+  intersects(ray: Ray3d, tmin: number, tmax: number): IIntersectHit | undefined {
+    const back = this.toCylinder.backward;
+    const o = back.transformPos(ray.origin);
+    const d = back.transformDir(ray.direction);
+
+    // Side: (o.xy + t * d.xy)² = 1
+    const dxy2 = d.x * d.x + d.y * d.y;
+    const oDotD = o.x * d.x + o.y * d.y;
+    const oxy2 = o.x * o.x + o.y * o.y;
+    let [t0, t1] = sortedQuadraticRoots(dxy2, 2 * oDotD, oxy2 - 1);
+    const h0 = o.z + t0 * d.z;
+    const h1 = o.z + t1 * d.z;
+
+    // Caps: z = 0 and z = 1 in canonical space.
+    let t2 = -o.z / d.z;
+    let t3 = (1 - o.z) / d.z;
+    const cx2 = o.x + t2 * d.x, cy2 = o.y + t2 * d.y;
+    const cx3 = o.x + t3 * d.x, cy3 = o.y + t3 * d.y;
+    const r2 = cx2 * cx2 + cy2 * cy2;
+    const r3 = cx3 * cx3 + cy3 * cy3;
+
+    if (isNaN(t0) || t0 > tmax || t0 < tmin || h0 < 0 || h0 > 1) t0 = Infinity;
+    if (isNaN(t1) || t1 > tmax || t1 < tmin || h1 < 0 || h1 > 1) t1 = Infinity;
+    if (isNaN(t2) || t2 > tmax || t2 < tmin || r2 > 1) t2 = Infinity;
+    if (isNaN(t3) || t3 > tmax || t3 < tmin || r3 > 1) t3 = Infinity;
+
+    const tf = Math.min(t2, t3);
+    const nf = t2 < t3 ? new V3d(0, 0, -1) : new V3d(0, 0, 1);
+
+    const ts = Math.min(t0, t1);
+    let nsx = 0, nsy = 0;
+    if (isFinite(ts)) {
+      const px = o.x + ts * d.x;
+      const py = o.y + ts * d.y;
+      const len = Math.sqrt(px * px + py * py);
+      if (len > 0) { nsx = px / len; nsy = py / len; }
+    }
+    const ns = new V3d(nsx, nsy, 0);
+
+    const tr = tf < ts ? tf : ts;
+    const nr = tf < ts ? nf : ns;
+    if (!isFinite(tr)) return undefined;
+    const point = ray.pointAt(tr);
+    const normal = transposedTransformDir(back, nr).normalize();
+    return { t: tr, point, normal };
+  }
+}
+
+// ---------- cone ----------
+
+class ConeIntersectable implements IIntersectable {
+  readonly boundingBox: Box3d;
+  private readonly toCone: Trafo3d;
+  constructor(cone: Cone3d) {
+    const h = cone.direction.length();
+    const r0 = cone.getRadius(h);
+    const axis = h === 0 ? V3d.unitZ : cone.direction.mul(1 / h);
+    this.toCone = Trafo3d.scaling(new V3d(r0, r0, h))
+      .mul(Trafo3d.rotateInto(V3d.unitZ, axis))
+      .mul(Trafo3d.translation(cone.origin));
+
+    // World-space bounding box: union of the apex and the base disc's AABB.
+    const center = cone.origin.add(axis.mul(h));
+    const ex = r0 * Math.sqrt(Math.max(0, 1 - axis.x * axis.x));
+    const ey = r0 * Math.sqrt(Math.max(0, 1 - axis.y * axis.y));
+    const ez = r0 * Math.sqrt(Math.max(0, 1 - axis.z * axis.z));
+    const minx = Math.min(cone.origin.x, center.x - ex);
+    const miny = Math.min(cone.origin.y, center.y - ey);
+    const minz = Math.min(cone.origin.z, center.z - ez);
+    const maxx = Math.max(cone.origin.x, center.x + ex);
+    const maxy = Math.max(cone.origin.y, center.y + ey);
+    const maxz = Math.max(cone.origin.z, center.z + ez);
+    this.boundingBox = new Box3d(minx, miny, minz, maxx, maxy, maxz);
+  }
+  intersects(ray: Ray3d, tmin: number, tmax: number): IIntersectHit | undefined {
+    const back = this.toCone.backward;
+    const o = back.transformPos(ray.origin);
+    const d = back.transformDir(ray.direction);
+
+    // In canonical cone space (apex at origin, axis +z, base at z=1, slant
+    // radius == z):  r(z)² = z²  ⇔  o.xy + t*d.xy)² = (o.z + t*d.z)²
+    const dxy2 = d.x * d.x + d.y * d.y;
+    const oxy2 = o.x * o.x + o.y * o.y;
+    const oDotDxy = o.x * d.x + o.y * d.y;
+    let [t0, t1] = sortedQuadraticRoots(
+      d.z * d.z - dxy2,
+      2 * (o.z * d.z - oDotDxy),
+      o.z * o.z - oxy2,
+    );
+    let t2 = (1 - o.z) / d.z;
+
+    const z0 = o.z + t0 * d.z;
+    const z1 = o.z + t1 * d.z;
+    const cx2 = o.x + t2 * d.x, cy2 = o.y + t2 * d.y;
+    const r2 = cx2 * cx2 + cy2 * cy2;
+
+    if (isNaN(t0) || t0 < tmin || t0 > tmax || z0 < 0 || z0 > 1) t0 = Infinity;
+    if (isNaN(t1) || t1 < tmin || t1 > tmax || z1 < 0 || z1 > 1) t1 = Infinity;
+    if (isNaN(t2) || t2 < tmin || t2 > tmax || r2 > 1) t2 = Infinity;
+
+    const ts = Math.min(t0, t1);
+    const tr = Math.min(ts, t2);
+    if (!isFinite(tr)) return undefined;
+
+    let nr: V3d;
+    if (ts < t2) {
+      const px = o.x + ts * d.x;
+      const py = o.y + ts * d.y;
+      const len = Math.sqrt(px * px + py * py);
+      const nx = len > 0 ? px / len : 0;
+      const ny = len > 0 ? py / len : 0;
+      nr = new V3d(nx, ny, -1);
+    } else {
+      nr = new V3d(0, 0, 1);
+    }
+    const point = ray.pointAt(tr);
+    const normal = transposedTransformDir(back, nr).normalize();
+    return { t: tr, point, normal };
+  }
+}
+
+// ---------- tetrahedron / octahedron ----------
+
+class PolyhedronFacesIntersectable implements IIntersectable {
+  readonly boundingBox: Box3d;
+  private readonly tris: ReadonlyArray<Triangle3d>;
+  private readonly normals: ReadonlyArray<V3d>;
+  constructor(tris: ReadonlyArray<Triangle3d>, vertices: ReadonlyArray<V3d>) {
+    this.tris = tris;
+    this.normals = tris.map(t => t.normal());
+    this.boundingBox = Box3d.fromPoints(vertices);
+  }
+  intersects(ray: Ray3d, tmin: number, tmax: number): IIntersectHit | undefined {
+    let bestT = Infinity;
+    let bestIdx = -1;
+    for (let i = 0; i < this.tris.length; i++) {
+      const tr = this.tris[i]!;
+      const h = rayTriangleMT(ray, tr.p0, tr.p1, tr.p2, tmin, tmax);
+      if (h && h.t < bestT) { bestT = h.t; bestIdx = i; }
+    }
+    if (bestIdx < 0) return undefined;
+    return {
+      t: bestT,
+      point: ray.pointAt(bestT),
+      // Use the face's *fixed* outward normal (computed at construction
+      // from the face winding) rather than re-deriving it from the ray.
+      normal: this.normals[bestIdx]!,
+    };
+  }
+}
+
+// ---------- planeXY ----------
+
+class PlaneXYIntersectable implements IIntersectable {
+  readonly boundingBox: Box3d;
+  private readonly bounds: Box2d;
+  constructor(bounds: Box2d) {
+    this.bounds = bounds;
+    const eps = 1e-8;
+    const mn = bounds.min, mx = bounds.max;
+    this.boundingBox = new Box3d(mn.x, mn.y, -eps, mx.x, mx.y, eps);
+  }
+  intersects(ray: Ray3d, tmin: number, tmax: number): IIntersectHit | undefined {
+    let t: number;
+    if (isTiny(ray.direction.z)) {
+      // Parallel to the plane — only the degenerate "ray on plane" case
+      // counts as a hit at t = 0.
+      if (!isTiny(ray.origin.z)) return undefined;
+      t = 0;
+    } else {
+      t = -ray.origin.z / ray.direction.z;
+    }
+    if (!isFinite(t) || t < tmin || t > tmax) return undefined;
+    const px = ray.origin.x + ray.direction.x * t;
+    const py = ray.origin.y + ray.direction.y * t;
+    if (!this.bounds.contains(new V2d(px, py))) return undefined;
+    return { t, point: ray.pointAt(t), normal: new V3d(0, 0, 1) };
+  }
+}
+
 // ---------- public namespace ----------
 
 export const Intersectable = {
@@ -337,4 +565,41 @@ export const Intersectable = {
   quad(q: Quad3d): IIntersectable { return new QuadIntersectable(q); },
   triangles(tris: ReadonlyArray<Triangle3d>): IIntersectable { return new TrianglesIntersectable(tris); },
   transformed(inner: IIntersectable, trafo: Trafo3d): IIntersectable { return new TransformedIntersectable(inner, trafo); },
+  cylinder(c: Cylinder3d): IIntersectable { return new CylinderIntersectable(c); },
+  cone(c: Cone3d): IIntersectable { return new ConeIntersectable(c); },
+  /**
+   * Solid tetrahedron with vertices `p0..p3`. Faces are wound so that
+   * their geometric normals point outward (matches the F# port).
+   */
+  tetrahedron(p0: V3d, p1: V3d, p2: V3d, p3: V3d): IIntersectable {
+    const tris = [
+      new Triangle3d(p0, p2, p1),
+      new Triangle3d(p0, p1, p3),
+      new Triangle3d(p0, p3, p2),
+      new Triangle3d(p1, p2, p3),
+    ];
+    return new PolyhedronFacesIntersectable(tris, [p0, p1, p2, p3]);
+  },
+  /**
+   * Solid octahedron: an "equator" ring `p0..p3` plus a top apex `top`
+   * and a bottom apex `bottom`. Faces are wound for outward normals.
+   */
+  octahedron(p0: V3d, p1: V3d, p2: V3d, p3: V3d, top: V3d, bottom: V3d): IIntersectable {
+    const tris = [
+      new Triangle3d(p0, p1, top),
+      new Triangle3d(p1, p2, top),
+      new Triangle3d(p2, p3, top),
+      new Triangle3d(p3, p0, top),
+      new Triangle3d(p0, bottom, p1),
+      new Triangle3d(p1, bottom, p2),
+      new Triangle3d(p2, bottom, p3),
+      new Triangle3d(p3, bottom, p0),
+    ];
+    return new PolyhedronFacesIntersectable(tris, [p0, p1, p2, p3, top, bottom]);
+  },
+  /**
+   * Bounded patch of the XY plane (z = 0). The boundingBox has a tiny
+   * non-zero z-extent so BVH builders can use it without collapsing.
+   */
+  planeXY(bounds: Box2d): IIntersectable { return new PlaneXYIntersectable(bounds); },
 } as const;
