@@ -45,6 +45,10 @@
       "types": "./dist/font/index.d.ts",
       "import": "./dist/font/index.js"
     },
+    "./svg": {
+      "types": "./dist/svg/index.d.ts",
+      "import": "./dist/svg/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
