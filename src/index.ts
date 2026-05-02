@@ -119,9 +119,19 @@ export {
   type BvhHit,
   BVH_SPLIT_LIMIT,
 } from "./geometry/bvh.js";
+export {
+  type PathSegment,
+  type PathSegmentKind,
+  LineSegment,
+  Bezier2Segment,
+  Bezier3Segment,
+  ArcSegment,
+  Path,
+} from "./geometry/path/index.js";
 
 // Numerics
 export { Polynomial } from "./numerics/polynomial.js";
+export * as Quadrature from "./numerics/quadrature.js";
 
 // Spatial cells
 export { Cell } from "./cell/cell.js";
