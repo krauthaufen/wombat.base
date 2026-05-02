@@ -13,3 +13,10 @@ export {
   type PlanarEdge,
   buildPlanarGraph,
 } from "./planar-graph.js";
+export {
+  type HalfEdge,
+  type Face,
+  type FaceExtractionResult,
+  extractFaces,
+} from "./face-extract.js";
+export { computeWindings, filledFaceIndices } from "./winding.js";
