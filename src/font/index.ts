@@ -20,3 +20,8 @@ export {
   segmentsFromLayout,
   textToSegments,
 } from "./layout.js";
+export {
+  type GlyphRecord,
+  GlyphCache,
+  GLYPH_FLOATS_PER_VERTEX,
+} from "./glyph-cache.js";
