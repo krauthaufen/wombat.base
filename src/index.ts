@@ -127,6 +127,8 @@ export {
   Bezier3Segment,
   ArcSegment,
   Path,
+  intersections as pathSegmentIntersections,
+  DEFAULT_EPS as PATH_INTERSECTION_DEFAULT_EPS,
 } from "./geometry/path/index.js";
 
 // Numerics

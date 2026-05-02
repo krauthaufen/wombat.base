@@ -7,3 +7,4 @@ export {
   ArcSegment,
 } from "./segment.js";
 export { Path } from "./path.js";
+export { intersections, DEFAULT_EPS } from "./intersect.js";
