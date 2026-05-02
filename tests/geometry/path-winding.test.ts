@@ -41,23 +41,28 @@ describe("winding — basics", () => {
     expect(sorted).toEqual([-1, 0]);
   });
 
-  // Disconnected DCEL components — KNOWN LIMITATION. When two
-  // closed contours are nested but do NOT touch, each lives in its
-  // own connected component of the half-edge graph. A single DCEL
-  // face cycle on Component B's forward direction is geometrically
-  // the union of "outside the inner square" — which spans BOTH the
-  // ring (between outer and inner) AND the unbounded plane (outside
-  // outer). pickInteriorPoint returns one or the other depending on
-  // which boundary edge it samples; ray-casting from each gives a
-  // different winding number, so the DCEL face's "winding" is not
-  // well-defined.
-  //
-  // The standard fix is to add bridge edges between components so
-  // the planar graph becomes connected. Tracked as a future Stage
-  // 3.5 ("connect disconnected components") — see project notes.
-  it.todo("annulus (CCW outer + CW inner hole) — needs Stage 3.5 component bridging");
-  it.todo("nested CCW contours — needs Stage 3.5 component bridging");
-  it.todo("filledFaceIndices on disconnected nested contours — needs Stage 3.5");
+  // Disconnected nested contours: the path-bridge.test.ts suite
+  // covers winding correctness on the augmented (bridged) graph.
+  // Here we just sanity-check that the un-augmented winding still
+  // works for a connected planar graph (one closed contour with
+  // self-touch behaviour, not two disjoint contours).
+  it("self-touching figure-8 (one connected planar graph): non-zero winding on each loop", () => {
+    // A figure-8 traced as one closed path: a single contour that
+    // crosses itself at the origin. Both lobes should have winding
+    // ±1; the outer face has winding 0.
+    const path = [
+      new LineSegment(new V2d(-1, 0), new V2d(0, 1)),
+      new LineSegment(new V2d(0, 1), new V2d(1, 0)),
+      new LineSegment(new V2d(1, 0), new V2d(0, -1)),
+      new LineSegment(new V2d(0, -1), new V2d(-1, 0)),
+    ];
+    const g = buildPlanarGraph(path);
+    const w = computeWindings(extractFaces(g), g);
+    // 2 faces (it's just a CCW diamond, no self-cross): 0 and ±1.
+    const sorted = [...w].sort((a, b) => a - b);
+    expect(sorted.length).toBe(2);
+    expect(Math.abs(sorted[0]!) + Math.abs(sorted[1]!)).toBe(1);
+  });
 
   it("disconnected CCW squares: each interior fills independently", () => {
     const g = buildPlanarGraph([

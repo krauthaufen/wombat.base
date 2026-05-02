@@ -33,6 +33,11 @@ export interface PlanarEdge {
   readonly segment: PathSegment;
   readonly start: number; // index into PlanarGraph.vertices
   readonly end: number;
+  /** True if this edge was inserted as a bridge between disconnected
+   *  components (Stage 3.5). Bridge edges contribute to face topology
+   *  but are NOT part of the actual fill boundary — they should be
+   *  excluded from the rendered outline. */
+  readonly isBridge?: boolean;
 }
 
 export class PlanarGraph {

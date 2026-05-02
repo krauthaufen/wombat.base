@@ -188,10 +188,14 @@ function pickInteriorPoint(
   if (len < 1e-15) return mid; // degenerate
   // Left perpendicular of (tx, ty) is (-ty, tx); normalize.
   const nx = -ty / len, ny = tx / len;
-  // Step in by a tiny fraction of the segment's bounding-box diagonal
-  // (heuristic: avoids jumping past nearby parallel boundaries).
+  // Step in by a fraction of the segment's bounding-box diagonal
+  // (heuristic: avoids jumping past nearby parallel boundaries) but
+  // also enforce a minimum well above the ray-cast endpoint tolerance
+  // (T_EPS = 1e-9). Otherwise crossings at nearby segment endpoints
+  // get filtered as "endpoint-adjacent" and the winding undercounts.
   const bb = seg.bounds().size();
-  const step = Math.max(Math.min(bb.x, bb.y) * 1e-3, 1e-9);
+  const diag = Math.hypot(bb.x, bb.y);
+  const step = Math.max(diag * 1e-3, 1e-6);
   return new V2d(mid.x + nx * step, mid.y + ny * step);
 }
 

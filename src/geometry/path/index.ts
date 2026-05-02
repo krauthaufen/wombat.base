@@ -26,3 +26,5 @@ export {
   type ComponentDecomposition,
   detectComponents,
 } from "./components.js";
+export { connectComponents } from "./bridge.js";
+export { tessellatePath, type TessellationResult } from "./tessellate.js";
