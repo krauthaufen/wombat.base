@@ -8,8 +8,7 @@ import {
 } from "../../src/geometry/path/index.js";
 
 function readKind(vertices: Float32Array, vertexIndex: number): number {
-  const dv = new DataView(vertices.buffer, vertices.byteOffset, vertices.byteLength);
-  return dv.getUint32((vertexIndex * 6 + 5) * 4, true);
+  return vertices[vertexIndex * 6 + 5]!;
 }
 
 function readPosition(vertices: Float32Array, vertexIndex: number): [number, number] {
