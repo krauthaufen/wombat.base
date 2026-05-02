@@ -295,6 +295,13 @@ export class Bezier3Segment {
  */
 export class ArcSegment {
   readonly kind = "arc" as const;
+  /** Explicit start point — stored, NOT recomputed from `startAngle`.
+   * Crucial for the closed-path invariant and for the planar-graph
+   * stage: two arcs that share a vertex must compare bit-exact, which
+   * trig-derived endpoints would not. */
+  readonly start: V2d;
+  /** Explicit end point — stored, NOT recomputed. */
+  readonly end: V2d;
   readonly center: V2d;
   readonly axis0: V2d;
   readonly axis1: V2d;
@@ -302,12 +309,12 @@ export class ArcSegment {
   readonly deltaAngle: number;
 
   constructor(
-    center: V2d,
-    axis0: V2d,
-    axis1: V2d,
-    startAngle: number,
-    deltaAngle: number,
+    start: V2d, end: V2d,
+    center: V2d, axis0: V2d, axis1: V2d,
+    startAngle: number, deltaAngle: number,
   ) {
+    this.start = start;
+    this.end = end;
     this.center = center;
     this.axis0 = axis0;
     this.axis1 = axis1;
@@ -315,11 +322,33 @@ export class ArcSegment {
     this.deltaAngle = deltaAngle;
   }
 
+  /**
+   * Build an arc from `(center, axis0, axis1, startAngle, deltaAngle)`,
+   * computing the endpoints once. Use this when you don't already
+   * have explicit endpoints to thread through.
+   */
+  static fromAngles(
+    center: V2d, axis0: V2d, axis1: V2d,
+    startAngle: number, deltaAngle: number,
+  ): ArcSegment {
+    const evalAt = (theta: number): V2d => {
+      const c = Math.cos(theta), s = Math.sin(theta);
+      return new V2d(
+        center.x + c * axis0.x + s * axis1.x,
+        center.y + c * axis0.y + s * axis1.y,
+      );
+    };
+    return new ArcSegment(
+      evalAt(startAngle), evalAt(startAngle + deltaAngle),
+      center, axis0, axis1, startAngle, deltaAngle,
+    );
+  }
+
   /** Circular arc, axis-aligned parametric frame. */
   static circular(
     center: V2d, radius: number, startAngle: number, deltaAngle: number,
   ): ArcSegment {
-    return new ArcSegment(
+    return ArcSegment.fromAngles(
       center, new V2d(radius, 0), new V2d(0, radius), startAngle, deltaAngle,
     );
   }
@@ -333,7 +362,7 @@ export class ArcSegment {
     startAngle: number, deltaAngle: number,
   ): ArcSegment {
     const c = Math.cos(rotation), s = Math.sin(rotation);
-    return new ArcSegment(
+    return ArcSegment.fromAngles(
       center,
       new V2d(rx * c, rx * s),
       new V2d(-ry * s, ry * c),
@@ -358,10 +387,9 @@ export class ArcSegment {
     );
   }
 
-  get start(): V2d { return this.pointAt(this.startAngle); }
-  get end(): V2d { return this.pointAt(this.startAngle + this.deltaAngle); }
-
   eval(t: number): V2d {
+    if (t <= 0) return this.start;
+    if (t >= 1) return this.end;
     return this.pointAt(this.startAngle + t * this.deltaAngle);
   }
 
@@ -395,15 +423,31 @@ export class ArcSegment {
   }
 
   split(t: number): [ArcSegment, ArcSegment] {
-    const mid = t * this.deltaAngle;
+    // Share the midpoint V2d by-identity between the two halves so
+    // `left.end === right.start` exactly — the tessellator's
+    // planar-graph step depends on bit-identical shared vertices.
+    const midDelta = t * this.deltaAngle;
+    const midAngle = this.startAngle + midDelta;
+    const midPoint = this.pointAt(midAngle);
     return [
-      new ArcSegment(this.center, this.axis0, this.axis1, this.startAngle, mid),
-      new ArcSegment(this.center, this.axis0, this.axis1, this.startAngle + mid, this.deltaAngle - mid),
+      new ArcSegment(
+        this.start, midPoint,
+        this.center, this.axis0, this.axis1,
+        this.startAngle, midDelta,
+      ),
+      new ArcSegment(
+        midPoint, this.end,
+        this.center, this.axis0, this.axis1,
+        midAngle, this.deltaAngle - midDelta,
+      ),
     ];
   }
 
   reverse(): ArcSegment {
+    // Re-use the existing start/end V2d instances so consecutive
+    // reversed segments stay bit-identically connected.
     return new ArcSegment(
+      this.end, this.start,
       this.center, this.axis0, this.axis1,
       this.startAngle + this.deltaAngle,
       -this.deltaAngle,

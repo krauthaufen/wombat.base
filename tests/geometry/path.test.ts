@@ -233,6 +233,25 @@ describe("ArcSegment", () => {
     expect(l.length() + r.length()).toBeCloseTo(a.length(), 10);
   });
 
+  it("split preserves bit-identical shared endpoints", () => {
+    // The planar-graph stage of the tessellator depends on
+    // `seg[i].end` and `seg[i+1].start` being the SAME V2d instance,
+    // not "approximately equal" — trig-derived recomputation would
+    // disagree at the 1e-16 level and break vertex sharing.
+    const a = ArcSegment.circular(new V2d(0, 0), 1, 0.7, 1.2);
+    const [l, r] = a.split(0.4);
+    expect(l.end).toBe(r.start);
+    expect(l.start).toBe(a.start);
+    expect(r.end).toBe(a.end);
+  });
+
+  it("reverse re-uses start/end V2d by identity", () => {
+    const a = ArcSegment.circular(new V2d(2, 3), 1.5, 0.1, 1.0);
+    const r = a.reverse();
+    expect(r.start).toBe(a.end);
+    expect(r.end).toBe(a.start);
+  });
+
   it("reverse flips deltaAngle and swaps endpoints", () => {
     const a = ArcSegment.circular(new V2d(0, 0), 1, 0, Math.PI / 2);
     const r = a.reverse();
