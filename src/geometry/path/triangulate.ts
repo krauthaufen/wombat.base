@@ -32,6 +32,7 @@ import {
   classifyCurve,
   chordPoints,
 } from "./loop-blinn.js";
+import poly2tri from "poly2tri";
 
 export interface FlatTriangle {
   /** World-space vertices of the triangle (CCW). */
@@ -78,6 +79,13 @@ export interface FaceTriangulation {
   /** Outline ribbons along boundary LINE edges (skipped for curves
    *  and bridges). Empty when the face has no straight boundary. */
   readonly ribbons: ReadonlyArray<RibbonTriangle>;
+  /** Halo triangles tiling the face's bounding-box-plus-halo
+   *  rectangle MINUS polygon MINUS outward-bulging curve triangles.
+   *  Encoded by the buffer builder as kind=1 / klm=(1,0,1) so the
+   *  Loop-Blinn fragment test discards every fragment — they exist
+   *  only to make the whole glyph mesh watertight (no missed
+   *  pixels along curve↔outside boundaries) without painting BG. */
+  readonly outerHalo: ReadonlyArray<FlatTriangle>;
 }
 
 // ---------------------------------------------------------------------------
@@ -421,10 +429,227 @@ function buildFacePolygon(
 }
 
 /**
+ * Walk one contour (outer or inner) starting at `startHeIdx` by
+ * following non-bridge half-edge `dst → src` chaining. Returns the
+ * closed polyline with curve sub-piece break points and outward-
+ * bulge control vertices injected so the halo CDT wraps around the
+ * curve triangles that live outside the glyph fill. `visited` is
+ * mutated to include every halfedge consumed.
+ */
+function walkContour(
+  startHeIdx: number,
+  bySrc: Map<number, number>,
+  extraction: FaceExtractionResult,
+  graph: PlanarGraph,
+  visited: Set<number>,
+): V2d[] {
+  const contour: V2d[] = [];
+  let cur: number | undefined = startHeIdx;
+  while (cur !== undefined && !visited.has(cur)) {
+    visited.add(cur);
+    const he = extraction.halfEdges[cur]!;
+    const edge = graph.edges[he.edgeIndex]!;
+    contour.push(graph.vertices[he.src]!);
+    const segOriented = he.reversed ? edge.segment.reverse() : edge.segment;
+    const breaks = chordPoints(segOriented);
+    const subTriangles = classifyCurve(segOriented);
+    for (let i = 0; i < subTriangles.length; i++) {
+      const ct = subTriangles[i]!;
+      // Outward-bulging: control sits on the BG side of the chord
+      // (regardless of contour orientation). Injecting it here
+      // wraps the curve triangle so the halo CDT doesn't overlap
+      // it. Inward bulges leave the contour straight along the
+      // chord — the curve triangle lives on the FILLED side and
+      // is handled by the polygon's own detour-via-control in
+      // `buildFacePolygon`.
+      if (ct.bulgesOutward) contour.push(ct.vertices[1]!);
+      if (i < breaks.length) contour.push(breaks[i]!);
+    }
+    cur = bySrc.get(he.dst);
+  }
+  return contour;
+}
+
+/**
+ * Split a face into its outline contours, skipping bridge edges.
+ * The face may contain a single outer contour plus any number of
+ * inner contours (counter holes inside `e` / `a` / `o` / …); the
+ * planar-graph extractor stitches them into one face via bridge
+ * edges. We strip bridges and follow `dst → src` connectivity to
+ * recover each closed contour.
+ */
+function extractContours(
+  face: Face,
+  extraction: FaceExtractionResult,
+  graph: PlanarGraph,
+): V2d[][] {
+  const bySrc = new Map<number, number>();
+  for (const heIdx of face.halfEdges) {
+    const he = extraction.halfEdges[heIdx]!;
+    const edge = graph.edges[he.edgeIndex]!;
+    if (edge.isBridge) continue;
+    bySrc.set(he.src, heIdx);
+  }
+  const contours: V2d[][] = [];
+  const visited = new Set<number>();
+  for (const heIdx of bySrc.values()) {
+    if (visited.has(heIdx)) continue;
+    const c = walkContour(heIdx, bySrc, extraction, graph, visited);
+    if (c.length >= 3) contours.push(c);
+  }
+  return contours;
+}
+
+/**
+ * Drop consecutive duplicate vertices (poly2tri's edge constructor
+ * throws "repeated points" when two adjacent verts coincide, e.g.
+ * at near-straight beziers where the control collapses onto a
+ * chord endpoint).
+ */
+function dedupContour(contour: ReadonlyArray<V2d>): V2d[] {
+  const out: V2d[] = [];
+  for (const p of contour) {
+    const prev = out.length === 0 ? contour[contour.length - 1]! : out[out.length - 1]!;
+    if (out.length > 0 && Math.abs(p.x - prev.x) < 1e-9 && Math.abs(p.y - prev.y) < 1e-9) continue;
+    out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Twice the signed area of a closed polygon (CCW = positive).
+ */
+function polygonSignedArea2(poly: ReadonlyArray<V2d>): number {
+  let s = 0;
+  for (let i = 0, n = poly.length; i < n; i++) {
+    const a = poly[i]!, b = poly[(i + 1) % n]!;
+    s += (a.x * b.y) - (b.x * a.y);
+  }
+  return s;
+}
+
+/**
+ * Tile the rectangle around `polygon` (expanded by 0.2 × bbox-size)
+ * with triangles, treating the merged polygon-plus-outward-curves
+ * outline as a single hole. The outer triangles are tagged in the
+ * vertex buffer with klm that always discards in the FS, so the
+ * mesh covers every pixel inside the bbox without painting
+ * background. Watertight: shares vertex positions with the polygon
+ * and outward curve-triangle outlines, so no T-junctions /
+ * sub-pixel cracks at the boundaries.
+ */
+/**
+ * Tile a single closed simple-polygon contour with triangles using
+ * poly2tri. Returns empty on degenerate input.
+ */
+function tileSimpleContour(contour: ReadonlyArray<V2d>): FlatTriangle[] {
+  if (contour.length < 3) return [];
+  try {
+    const ctx = new poly2tri.SweepContext(
+      contour.map(p => new poly2tri.Point(p.x, p.y)),
+    );
+    ctx.triangulate();
+    return ctx.getTriangles().map(t => {
+      const a = t.getPoint(0), b = t.getPoint(1), c = t.getPoint(2);
+      return {
+        vertices: [
+          new V2d(a.x, a.y),
+          new V2d(b.x, b.y),
+          new V2d(c.x, c.y),
+        ] as const,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Watertight halo that tiles the bbox-around-glyph rectangle MINUS
+ * the glyph's filled region. The face's contours are split at
+ * bridge edges so each closed simple-polygon contour can be
+ * registered independently with poly2tri:
+ *
+ *   • The OUTER contour (CCW = positive signed area for filled
+ *     faces) is added as a hole to a bbox-sized contour, giving
+ *     all "outside the glyph" halo triangles.
+ *
+ *   • Each INNER contour (CW from the face's perspective — counter
+ *     holes in `e` / `a` / `o` / …) is triangulated as its own
+ *     simple-polygon contour, giving "inside the counter hole"
+ *     halo triangles.
+ *
+ * Triangles are tagged in the vertex buffer with klm = (1, 0, 1)
+ * so the Loop-Blinn fragment test discards every fragment — they
+ * exist only to make the whole glyph mesh watertight.
+ */
+function buildOuterHalo(
+  face: Face, extraction: FaceExtractionResult, graph: PlanarGraph,
+): FlatTriangle[] {
+  const contours = extractContours(face, extraction, graph)
+    .map(dedupContour)
+    .filter(c => c.length >= 3);
+  if (contours.length === 0) return [];
+  // Outer contour = the one with the largest CCW (positive) area.
+  // Faces with CCW boundary in our convention have outer area
+  // positive; inner contours are CW (negative).
+  let outerIdx = 0;
+  let outerArea = polygonSignedArea2(contours[0]!);
+  for (let i = 1; i < contours.length; i++) {
+    const a = polygonSignedArea2(contours[i]!);
+    if (a > outerArea) { outerArea = a; outerIdx = i; }
+  }
+  const outer = contours[outerIdx]!;
+  let minX = outer[0]!.x, maxX = outer[0]!.x;
+  let minY = outer[0]!.y, maxY = outer[0]!.y;
+  for (const p of outer) {
+    if (p.x < minX) minX = p.x; else if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y; else if (p.y > maxY) maxY = p.y;
+  }
+  const halo = 0.2 * Math.max(maxX - minX, maxY - minY);
+  if (halo <= 0) return [];
+  const x0 = minX - halo, x1 = maxX + halo;
+  const y0 = minY - halo, y1 = maxY + halo;
+  const out: FlatTriangle[] = [];
+  // (1) Tile bbox MINUS outer contour.
+  try {
+    const ctx = new poly2tri.SweepContext([
+      new poly2tri.Point(x0, y0),
+      new poly2tri.Point(x1, y0),
+      new poly2tri.Point(x1, y1),
+      new poly2tri.Point(x0, y1),
+    ]);
+    ctx.addHole(outer.map(p => new poly2tri.Point(p.x, p.y)));
+    ctx.triangulate();
+    for (const t of ctx.getTriangles()) {
+      const a = t.getPoint(0), b = t.getPoint(1), c = t.getPoint(2);
+      out.push({
+        vertices: [
+          new V2d(a.x, a.y),
+          new V2d(b.x, b.y),
+          new V2d(c.x, c.y),
+        ] as const,
+      });
+    }
+  } catch { /* fall through — partial halo is OK */ }
+  // (2) For each inner contour (counter hole), tile its interior.
+  // poly2tri wants CCW input; inner contours are CW from the
+  // face's perspective, so reverse them before passing in.
+  for (let i = 0; i < contours.length; i++) {
+    if (i === outerIdx) continue;
+    const inner = polygonSignedArea2(contours[i]!) < 0
+      ? [...contours[i]!].reverse()
+      : contours[i]!;
+    out.push(...tileSimpleContour(inner));
+  }
+  return out;
+}
+
+/**
  * Triangulate one face: emit interior flat triangles + curve
- * boundary triangles. The face is assumed to be in CCW order
- * (positive signed area); CW faces should be skipped or reversed
- * by the caller before invoking this.
+ * boundary triangles + outer halo. The face is assumed to be in CCW
+ * order (positive signed area); CW faces should be skipped or
+ * reversed by the caller before invoking this.
  */
 export function triangulateFace(
   face: Face, extraction: FaceExtractionResult, graph: PlanarGraph,
@@ -435,7 +660,8 @@ export function triangulateFace(
     vertices: [polygon[a]!, polygon[b]!, polygon[c]!] as const,
   }));
   const ribbons = buildLineRibbons(face, extraction, graph);
-  return { flat, curves, ribbons };
+  const outerHalo = buildOuterHalo(face, extraction, graph);
+  return { flat, curves, ribbons, outerHalo };
 }
 
 /**
@@ -451,6 +677,7 @@ export function triangulateFilledFaces(
   const flat: FlatTriangle[] = [];
   const curves: CurveTriangle[] = [];
   const ribbons: RibbonTriangle[] = [];
+  const outerHalo: FlatTriangle[] = [];
   for (const fi of filledFaceIndices) {
     const f = extraction.faces[fi]!;
     if (f.signedArea <= 0) continue; // skip CW / outer faces
@@ -458,6 +685,7 @@ export function triangulateFilledFaces(
     flat.push(...tri.flat);
     curves.push(...tri.curves);
     ribbons.push(...tri.ribbons);
+    outerHalo.push(...tri.outerHalo);
   }
-  return { flat, curves, ribbons };
+  return { flat, curves, ribbons, outerHalo };
 }

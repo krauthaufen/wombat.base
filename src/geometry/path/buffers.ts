@@ -2,20 +2,33 @@
 //
 // The fragment shader needs three things per vertex:
 //   - position  (vec2<f32>) — world-space xy
-//   - klm       (vec3<f32>) — Loop-Blinn texcoord
-//   - kind      (f32)       — 0 = interior, 1 = bezier2, 2 = arc
+//   - klm       (vec3<f32>) — Loop-Blinn texcoord (or
+//                            (outwardX, outwardY, isOuter) when
+//                            kind = 3, line ribbon)
+//   - kind      (f32)       — 0 interior, 1 bezier2, 2 arc,
+//                            3 line ribbon
 //
 // We pack them into one interleaved array (6 f32 = 24 bytes per
-// vertex) and produce a single Uint32Array of triangle indices. Two
-// triangle ranges are reported separately — `interiorRange` and
-// `curveRange` — for callers that want to render them with separate
-// pipelines (the unified Loop-Blinn shader handles them in one
-// pipeline by branching on `kind`, but other use cases may differ).
+// vertex) and produce a single Uint32Array of triangle indices.
+// Three triangle ranges are reported separately — `interiorRange`,
+// `curveRange`, `ribbonRange` — for callers that want to render
+// them with separate pipelines (the unified Loop-Blinn shader
+// handles them in one pipeline by branching on `kind`).
 //
 // Kind is stored as f32 (not u32) so the vertex output doesn't
 // require flat interpolation in the shader. Each triangle has a
 // uniform kind across its 3 vertices, so f32 interpolation gives the
 // constant value across the triangle interior.
+//
+// Curve triangles are EXPANDED on the CPU so the implicit-gradient
+// AA ramp has rasterised pixels to land on regardless of how thin
+// the underlying (start, control, end) triangle is. Loop-Blinn klm
+// interpolates linearly across any triangle, so we can pick
+// arbitrary new vertices and compute their klm via barycentric
+// extrapolation — the implicit f stays valid everywhere in the
+// extended triangle. Expansion factor: 0.2 × bbox_size of the
+// original (start, control, end) — keeps the halo proportional to
+// the curve's own extent without needing screen-space math.
 //
 // `bulgesOutward` is also reported per curve triangle so the
 // renderer can flip the comparison sign (inward-bulging curves
@@ -72,8 +85,12 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
   const totalTriCount = flatTriCount + curveTriCount + ribbonTriCount;
   const totalVertCount = totalTriCount * 3;
 
-  const vertices = new Float32Array(totalVertCount * 6); // x, y, klm.x, klm.y, klm.z, kind
-  const indices = new Uint32Array(totalTriCount * 3);
+  const haloTriCount = t.outerHalo.length;
+  const totalVerts2  = (flatTriCount + curveTriCount + ribbonTriCount + haloTriCount) * 3;
+  const totalIdx2    = (flatTriCount + curveTriCount + ribbonTriCount + haloTriCount) * 3;
+
+  const vertices = new Float32Array(totalVerts2 * 6); // x, y, klm.x, klm.y, klm.z, kind
+  const indices = new Uint32Array(totalIdx2);
   const curveBulgeOutward = new Uint8Array(curveTriCount);
 
   let vi = 0; // vertex slot pointer (in elements)
@@ -99,6 +116,10 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
   const interiorIndexCount = ii;
 
   // ---- Curve triangles ----
+  // Original (start, control, end) triangles with Loop-Blinn klm.
+  // The outer halo (below) adds CDT-tessellated triangles covering
+  // the bbox area outside polygon + outside outward-curve triangles,
+  // so the whole glyph mesh tiles the bbox watertight.
   for (let ci = 0; ci < curveTriCount; ci++) {
     const tri = t.curves[ci]!;
     const kind = tri.kind === "arc" ? VERTEX_KIND_ARC : VERTEX_KIND_BEZIER2;
@@ -117,6 +138,29 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
     }
   }
   const curveIndexCount = ii - interiorIndexCount;
+
+  // ---- Outer halo (CDT) triangles ----
+  // Tile the bbox-around-glyph with triangles outside polygon and
+  // outside any outward-bulging curve triangle. Encoded as kind=1
+  // (bezier2) with klm = (1, 0, 1) at all 3 verts → implicit
+  // f = 1²−0 = 1 > 0 everywhere, so the FS discards every fragment.
+  // This keeps the mesh watertight without painting the surrounding
+  // BG. Same fragment-shader code path as real bezier2 triangles
+  // (no new shader branch needed).
+  for (const tri of t.outerHalo) {
+    for (let k = 0; k < 3; k++) {
+      const p = tri.vertices[k]!;
+      vertices[vi + 0] = p.x;
+      vertices[vi + 1] = p.y;
+      vertices[vi + 2] = 1;
+      vertices[vi + 3] = 0;
+      vertices[vi + 4] = 1;
+      vertices[vi + 5] = VERTEX_KIND_BEZIER2;
+      vi += 6;
+      indices[ii++] = nextIdx++;
+    }
+  }
+  const haloIndexCount = ii - interiorIndexCount - curveIndexCount;
 
   // ---- Line-edge AA ribbon triangles ----
   // klm slot is reinterpreted as (outwardX, outwardY, isOuter); the
@@ -137,14 +181,14 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
       indices[ii++] = nextIdx++;
     }
   }
-  const ribbonIndexCount = ii - interiorIndexCount - curveIndexCount;
+  const ribbonIndexCount = ii - interiorIndexCount - curveIndexCount - haloIndexCount;
 
   return {
     vertices,
     indices,
-    interiorRange: { firstIndex: 0,                                     indexCount: interiorIndexCount },
-    curveRange:    { firstIndex: interiorIndexCount,                    indexCount: curveIndexCount },
-    ribbonRange:   { firstIndex: interiorIndexCount + curveIndexCount,  indexCount: ribbonIndexCount },
+    interiorRange: { firstIndex: 0,                                                       indexCount: interiorIndexCount },
+    curveRange:    { firstIndex: interiorIndexCount,                                      indexCount: curveIndexCount + haloIndexCount },
+    ribbonRange:   { firstIndex: interiorIndexCount + curveIndexCount + haloIndexCount,   indexCount: ribbonIndexCount },
     curveBulgeOutward,
   };
 }
