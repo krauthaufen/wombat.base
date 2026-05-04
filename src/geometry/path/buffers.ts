@@ -48,6 +48,19 @@ export const VERTEX_KIND_ARC          = 2;
  * `1 - isOuter` as the AA alpha ramp.
  */
 export const VERTEX_KIND_LINE_RIBBON  = 3;
+/**
+ * Distance-field halo vertex. `klm.x` carries signed perpendicular
+ * distance to the glyph boundary in WORLD units (positive = outside,
+ * negative = inside). klm.y / klm.z are unused. The FS evaluates
+ *   `α = clamp(0.5 − klm.x / (fwidth(klm.x) · AaWidthPx), 0, 1)`,
+ * giving an AA ramp of width `AaWidthPx` framebuffer pixels centred
+ * on the polygon edge — same recipe as the curve-implicit AA, but
+ * with a linear distance field instead of a Loop-Blinn polynomial.
+ * Used for halo triangles whose two polygon-adjacent vertices form
+ * one polygon edge; the third (halo) vertex carries its world-space
+ * perpendicular distance to that edge as klm.x.
+ */
+export const VERTEX_KIND_DISTANCE_FIELD = 4;
 
 export const VERTEX_BYTE_SIZE = 24; // 6 × f32
 
@@ -85,12 +98,8 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
   const totalTriCount = flatTriCount + curveTriCount + ribbonTriCount;
   const totalVertCount = totalTriCount * 3;
 
-  const haloTriCount = t.outerHalo.length;
-  const totalVerts2  = (flatTriCount + curveTriCount + ribbonTriCount + haloTriCount) * 3;
-  const totalIdx2    = (flatTriCount + curveTriCount + ribbonTriCount + haloTriCount) * 3;
-
-  const vertices = new Float32Array(totalVerts2 * 6); // x, y, klm.x, klm.y, klm.z, kind
-  const indices = new Uint32Array(totalIdx2);
+  const vertices = new Float32Array(totalVertCount * 6); // x, y, klm.x, klm.y, klm.z, kind
+  const indices = new Uint32Array(totalTriCount * 3);
   const curveBulgeOutward = new Uint8Array(curveTriCount);
 
   let vi = 0; // vertex slot pointer (in elements)
@@ -117,9 +126,6 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
 
   // ---- Curve triangles ----
   // Original (start, control, end) triangles with Loop-Blinn klm.
-  // The outer halo (below) adds CDT-tessellated triangles covering
-  // the bbox area outside polygon + outside outward-curve triangles,
-  // so the whole glyph mesh tiles the bbox watertight.
   for (let ci = 0; ci < curveTriCount; ci++) {
     const tri = t.curves[ci]!;
     const kind = tri.kind === "arc" ? VERTEX_KIND_ARC : VERTEX_KIND_BEZIER2;
@@ -138,29 +144,6 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
     }
   }
   const curveIndexCount = ii - interiorIndexCount;
-
-  // ---- Outer halo (CDT) triangles ----
-  // Tile the bbox-around-glyph with triangles outside polygon and
-  // outside any outward-bulging curve triangle. Encoded as kind=1
-  // (bezier2) with klm = (1, 0, 1) at all 3 verts → implicit
-  // f = 1²−0 = 1 > 0 everywhere, so the FS discards every fragment.
-  // This keeps the mesh watertight without painting the surrounding
-  // BG. Same fragment-shader code path as real bezier2 triangles
-  // (no new shader branch needed).
-  for (const tri of t.outerHalo) {
-    for (let k = 0; k < 3; k++) {
-      const p = tri.vertices[k]!;
-      vertices[vi + 0] = p.x;
-      vertices[vi + 1] = p.y;
-      vertices[vi + 2] = 1;
-      vertices[vi + 3] = 0;
-      vertices[vi + 4] = 1;
-      vertices[vi + 5] = VERTEX_KIND_BEZIER2;
-      vi += 6;
-      indices[ii++] = nextIdx++;
-    }
-  }
-  const haloIndexCount = ii - interiorIndexCount - curveIndexCount;
 
   // ---- Line-edge AA ribbon triangles ----
   // klm slot is reinterpreted as (outwardX, outwardY, isOuter); the
@@ -181,14 +164,14 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
       indices[ii++] = nextIdx++;
     }
   }
-  const ribbonIndexCount = ii - interiorIndexCount - curveIndexCount - haloIndexCount;
+  const ribbonIndexCount = ii - interiorIndexCount - curveIndexCount;
 
   return {
     vertices,
     indices,
-    interiorRange: { firstIndex: 0,                                                       indexCount: interiorIndexCount },
-    curveRange:    { firstIndex: interiorIndexCount,                                      indexCount: curveIndexCount + haloIndexCount },
-    ribbonRange:   { firstIndex: interiorIndexCount + curveIndexCount + haloIndexCount,   indexCount: ribbonIndexCount },
+    interiorRange: { firstIndex: 0,                                indexCount: interiorIndexCount },
+    curveRange:    { firstIndex: interiorIndexCount,               indexCount: curveIndexCount },
+    ribbonRange:   { firstIndex: interiorIndexCount + curveIndexCount, indexCount: ribbonIndexCount },
     curveBulgeOutward,
   };
 }

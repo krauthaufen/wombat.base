@@ -79,13 +79,6 @@ export interface FaceTriangulation {
   /** Outline ribbons along boundary LINE edges (skipped for curves
    *  and bridges). Empty when the face has no straight boundary. */
   readonly ribbons: ReadonlyArray<RibbonTriangle>;
-  /** Halo triangles tiling the face's bounding-box-plus-halo
-   *  rectangle MINUS polygon MINUS outward-bulging curve triangles.
-   *  Encoded by the buffer builder as kind=1 / klm=(1,0,1) so the
-   *  Loop-Blinn fragment test discards every fragment — they exist
-   *  only to make the whole glyph mesh watertight (no missed
-   *  pixels along curve↔outside boundaries) without painting BG. */
-  readonly outerHalo: ReadonlyArray<FlatTriangle>;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +228,7 @@ export function earClip(
 // Aardvark.Rendering.Text), driving the m-component sign on each
 // curve triangle and the polygon-detour through inward control
 // points.
-function pointInsidePolygon(p: V2d, poly: ReadonlyArray<V2d>): boolean {
+export function pointInsidePolygon(p: V2d, poly: ReadonlyArray<V2d>): boolean {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const a = poly[i]!, b = poly[j]!;
@@ -565,90 +558,9 @@ function tileSimpleContour(contour: ReadonlyArray<V2d>): FlatTriangle[] {
 }
 
 /**
- * Watertight halo that tiles the bbox-around-glyph rectangle MINUS
- * the glyph's filled region. The face's contours are split at
- * bridge edges so each closed simple-polygon contour can be
- * registered independently with poly2tri:
- *
- *   • The OUTER contour (CCW = positive signed area for filled
- *     faces) is added as a hole to a bbox-sized contour, giving
- *     all "outside the glyph" halo triangles.
- *
- *   • Each INNER contour (CW from the face's perspective — counter
- *     holes in `e` / `a` / `o` / …) is triangulated as its own
- *     simple-polygon contour, giving "inside the counter hole"
- *     halo triangles.
- *
- * Triangles are tagged in the vertex buffer with klm = (1, 0, 1)
- * so the Loop-Blinn fragment test discards every fragment — they
- * exist only to make the whole glyph mesh watertight.
- */
-function buildOuterHalo(
-  face: Face, extraction: FaceExtractionResult, graph: PlanarGraph,
-): FlatTriangle[] {
-  const contours = extractContours(face, extraction, graph)
-    .map(dedupContour)
-    .filter(c => c.length >= 3);
-  if (contours.length === 0) return [];
-  // Outer contour = the one with the largest CCW (positive) area.
-  // Faces with CCW boundary in our convention have outer area
-  // positive; inner contours are CW (negative).
-  let outerIdx = 0;
-  let outerArea = polygonSignedArea2(contours[0]!);
-  for (let i = 1; i < contours.length; i++) {
-    const a = polygonSignedArea2(contours[i]!);
-    if (a > outerArea) { outerArea = a; outerIdx = i; }
-  }
-  const outer = contours[outerIdx]!;
-  let minX = outer[0]!.x, maxX = outer[0]!.x;
-  let minY = outer[0]!.y, maxY = outer[0]!.y;
-  for (const p of outer) {
-    if (p.x < minX) minX = p.x; else if (p.x > maxX) maxX = p.x;
-    if (p.y < minY) minY = p.y; else if (p.y > maxY) maxY = p.y;
-  }
-  const halo = 0.2 * Math.max(maxX - minX, maxY - minY);
-  if (halo <= 0) return [];
-  const x0 = minX - halo, x1 = maxX + halo;
-  const y0 = minY - halo, y1 = maxY + halo;
-  const out: FlatTriangle[] = [];
-  // (1) Tile bbox MINUS outer contour.
-  try {
-    const ctx = new poly2tri.SweepContext([
-      new poly2tri.Point(x0, y0),
-      new poly2tri.Point(x1, y0),
-      new poly2tri.Point(x1, y1),
-      new poly2tri.Point(x0, y1),
-    ]);
-    ctx.addHole(outer.map(p => new poly2tri.Point(p.x, p.y)));
-    ctx.triangulate();
-    for (const t of ctx.getTriangles()) {
-      const a = t.getPoint(0), b = t.getPoint(1), c = t.getPoint(2);
-      out.push({
-        vertices: [
-          new V2d(a.x, a.y),
-          new V2d(b.x, b.y),
-          new V2d(c.x, c.y),
-        ] as const,
-      });
-    }
-  } catch { /* fall through — partial halo is OK */ }
-  // (2) For each inner contour (counter hole), tile its interior.
-  // poly2tri wants CCW input; inner contours are CW from the
-  // face's perspective, so reverse them before passing in.
-  for (let i = 0; i < contours.length; i++) {
-    if (i === outerIdx) continue;
-    const inner = polygonSignedArea2(contours[i]!) < 0
-      ? [...contours[i]!].reverse()
-      : contours[i]!;
-    out.push(...tileSimpleContour(inner));
-  }
-  return out;
-}
-
-/**
  * Triangulate one face: emit interior flat triangles + curve
- * boundary triangles + outer halo. The face is assumed to be in CCW
- * order (positive signed area); CW faces should be skipped or
+ * boundary triangles + line ribbons. The face is assumed to be in
+ * CCW order (positive signed area); CW faces should be skipped or
  * reversed by the caller before invoking this.
  */
 export function triangulateFace(
@@ -660,8 +572,7 @@ export function triangulateFace(
     vertices: [polygon[a]!, polygon[b]!, polygon[c]!] as const,
   }));
   const ribbons = buildLineRibbons(face, extraction, graph);
-  const outerHalo = buildOuterHalo(face, extraction, graph);
-  return { flat, curves, ribbons, outerHalo };
+  return { flat, curves, ribbons };
 }
 
 /**
@@ -677,7 +588,6 @@ export function triangulateFilledFaces(
   const flat: FlatTriangle[] = [];
   const curves: CurveTriangle[] = [];
   const ribbons: RibbonTriangle[] = [];
-  const outerHalo: FlatTriangle[] = [];
   for (const fi of filledFaceIndices) {
     const f = extraction.faces[fi]!;
     if (f.signedArea <= 0) continue; // skip CW / outer faces
@@ -685,7 +595,6 @@ export function triangulateFilledFaces(
     flat.push(...tri.flat);
     curves.push(...tri.curves);
     ribbons.push(...tri.ribbons);
-    outerHalo.push(...tri.outerHalo);
   }
-  return { flat, curves, ribbons, outerHalo };
+  return { flat, curves, ribbons };
 }

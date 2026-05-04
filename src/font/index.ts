@@ -24,4 +24,14 @@ export {
   type GlyphRecord,
   GlyphCache,
   GLYPH_FLOATS_PER_VERTEX,
+  TRI_FLOATS_PER_TRI,
 } from "./glyph-cache.js";
+export {
+  type SdfSegment,
+  type GlyphSdf,
+  buildGlyphSdf,
+  packSdfSegments,
+  SDF_FLOATS_PER_SEGMENT,
+  SDF_KIND_LINE,
+  SDF_KIND_BEZIER2,
+} from "./glyph-sdf.js";

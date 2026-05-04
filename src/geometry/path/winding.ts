@@ -150,6 +150,8 @@ function arcParamFromAngle(
   return t < 0 ? 0 : t > 1 ? 1 : t;
 }
 
+export function _debugSegmentCrossings(p: V2d, seg: PathSegment): number { return segmentCrossings(p, seg); }
+
 function segmentCrossings(p: V2d, seg: PathSegment): number {
   switch (seg.kind) {
     case "line":    return lineCrossings(p, seg);
