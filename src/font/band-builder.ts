@@ -47,6 +47,7 @@ import type {
 } from "../geometry/path/triangulate.js";
 import type { CurveTriangle } from "../geometry/path/loop-blinn.js";
 import { tessellateContoursLibtess } from "../geometry/path/libtess-fill.js";
+import { pointInsidePolygon } from "../geometry/path/triangulate.js";
 import ClipperLib from "clipper-lib";
 
 interface ClipperPt { X: number; Y: number; }
@@ -109,74 +110,98 @@ export function buildGlyphBand(
   curves: ReadonlyArray<CurveTriangle>,
   haloEm: number,
 ): BandTriangle[] {
-  // Construct the band geometry per contour using Clipper2:
-  //   outer = InflatePaths(contour, +halo, Miter, Polygon)
-  //   inner = InflatePaths(contour, -halo, Miter, Polygon)
-  //   annulus = Difference(outer, inner)
-  // Clipper handles miter-cap fallback to bevel, holes, self-
-  // intersections at thin parts, and produces topologically clean
-  // closed paths with proper outer/hole orientation. We then hand
-  // the paths to libtess for plain polygon-with-holes triangulation.
+  // Band = ClipperOffset(innerApprox, +halo) DIFFERENCE innerApprox.
   //
-  // Clipper2 uses Point64 (integer) coords internally, so we scale
-  // em-space floats up by SCALE before feeding paths in, and scale
-  // back on the way out.
-  const SCALE = 1024;  // ~1e-3 em integer precision
-  const subjectPaths: ClipperPaths = [];
+  //   innerApprox = piecewise-linear polyline that lies INSIDE the
+  //                 body, by edge:
+  //                   line / arc / cubic    → chord (line IS body)
+  //                   bezier2 outward bulge → chord (chord is inside
+  //                                           body; the lens between
+  //                                           chord and curve is body
+  //                                           fill via the Loop-Blinn
+  //                                           lens triangle)
+  //                   bezier2 inward bulge  → legs p0-p1-p2 (p1 is
+  //                                           inside body, so legs
+  //                                           lie inside)
+  //   inflated    = innerApprox grown by halo in every direction.
+  //   band        = inflated − innerApprox = halo-wide strip on the
+  //                 OUTSIDE of innerApprox.
+  //
+  // No -halo offset: the inside of innerApprox is body, where the
+  // kind=0/1/2 body fill already produces α=1 — band work there is
+  // wasted overdraw. Difference clears it.
+  //
+  // Overlap with the body: at outward-bulging edges, innerApprox
+  // takes the chord, but the actual body extends out to the curve
+  // (via the kind=1 lens). The band's outer halo strip therefore
+  // overlaps the lens — harmless because the lens already paints
+  // α=1, and SDF distance for those band fragments still gives the
+  // correct AA ramp at the actual curve boundary.
+  // Clipper uses integer coords, so scale up em-space floats. SCALE
+  // must be high enough that round-off is well below sub-pixel —
+  // otherwise the band's Clipper-quantized inner boundary doesn't
+  // match the body's exact-em-space outer boundary, and the
+  // rasterizer flickers between the two slightly-different edges
+  // along the seam. 2^20 = ~1e-6 em precision (sub-pixel even at
+  // pathological zoom). Stays well within JS safe-int range under
+  // Clipper's coord×coord internals (53-bit / 2 = 2^26 limit).
+  const SCALE = 1 << 20;
+  // Pre-compute the chord polygon (= polygon of anchor points) for
+  // every contour. The "inside body" test for each curve's control
+  // point P1 is even-odd parity over these chord polygons: P1 is in
+  // body iff an odd number of contour chord polygons contain it.
+  // This matches what the mesh tessellator uses to decide ADD vs
+  // SUBTRACT on the curve's lens — orientation-independent.
+  const chordPolys: V2d[][] = outlineContours.map((c) => c.map((e) => e.start));
+  const innerExact: V2d[][] = [];
+  const innerSubj: ClipperPaths = [];
   for (const contour of outlineContours) {
-    const chunks = expandContour(contour, curves, haloEm);
-    if (chunks.length < 3) continue;
-    const path: ClipperPath = [];
-    for (const ck of chunks) {
-      const X = Math.round(ck.a.x * SCALE);
-      const Y = Math.round(ck.a.y * SCALE);
-      const last = path.length > 0 ? path[path.length - 1]! : null;
-      if (last !== null && last.X === X && last.Y === Y) continue;
-      path.push({ X, Y });
-    }
-    if (path.length < 3) continue;
-    const first = path[0]!;
-    const tail  = path[path.length - 1]!;
-    if (first.X === tail.X && first.Y === tail.Y) path.pop();
-    if (path.length < 3) continue;
-    subjectPaths.push(path);
+    const inner = buildInsideBodyPolyline(contour, curves, chordPolys);
+    if (inner.length < 3) continue;
+    innerExact.push(inner);
+    innerSubj.push(vec2dPathToClipper(inner, SCALE));
   }
-  if (subjectPaths.length === 0) return [];
+  if (innerSubj.length === 0) return [];
   const delta = haloEm * SCALE;
-  // ClipperLib.ClipperOffset(miterLimit, arcTolerance). Each Execute
-  // returns the offset paths for a single delta; run twice for
-  // ±halo, then Difference to get the annulus.
   const lib = ClipperLib as unknown as {
     ClipperOffset: new (miterLimit: number, arcTolerance: number) => {
       AddPaths(paths: ClipperPaths, joinType: number, endType: number): void;
       Execute(out: ClipperPaths, delta: number): void;
     };
-    Clipper: new () => {
-      AddPaths(paths: ClipperPaths, polyType: number, closed: boolean): void;
-      Execute(clipType: number, out: ClipperPaths, fillSubject: number, fillClip: number): boolean;
-    };
     JoinType: { jtMiter: number };
     EndType: { etClosedPolygon: number };
-    PolyType: { ptSubject: number; ptClip: number };
-    ClipType: { ctDifference: number };
-    PolyFillType: { pftNonZero: number };
   };
-  const offsetOuter = new lib.ClipperOffset(4.0, 0.25);
-  offsetOuter.AddPaths(subjectPaths, lib.JoinType.jtMiter, lib.EndType.etClosedPolygon);
-  const outerPaths: ClipperPaths = [];
-  offsetOuter.Execute(outerPaths, +delta);
-  const offsetInner = new lib.ClipperOffset(4.0, 0.25);
-  offsetInner.AddPaths(subjectPaths, lib.JoinType.jtMiter, lib.EndType.etClosedPolygon);
-  const innerPaths: ClipperPaths = [];
-  offsetInner.Execute(innerPaths, -delta);
-  const clip = new lib.Clipper();
-  clip.AddPaths(outerPaths, lib.PolyType.ptSubject, true);
-  clip.AddPaths(innerPaths, lib.PolyType.ptClip, true);
-  const annulus: ClipperPaths = [];
-  clip.Execute(lib.ClipType.ctDifference, annulus, lib.PolyFillType.pftNonZero, lib.PolyFillType.pftNonZero);
-  if (annulus.length === 0) return [];
+  // Use Clipper ONLY for the offset (we have no closed-form polygon
+  // offsetter, and Clipper handles miter caps + concave clipping
+  // correctly). The output is Clipper-quantized, but the inflated
+  // boundary is OUTSIDE the body where no other geometry lives, so
+  // quantization there can't cause a body/band seam mismatch.
+  //
+  // The inner polyline is NOT passed through Clipper — we hand it
+  // straight to libtess at exact em-space coords. That keeps it
+  // bit-identical to the body fill's outline, so body and band
+  // share their seam pixel-perfectly with no flicker.
+  //
+  // libtess EVEN-ODD on the union of (inner polylines + inflated
+  // polylines) fills regions inside an odd number of inputs:
+  //   - inside body, inside its inflated: even (2), empty.
+  //   - between body and inflated (outer band strip): odd (1), filled.
+  //   - inside hole, inside hole-inflated (= shrunken hole interior,
+  //     deep inside hole): even (4 — outer-CCW + outer-inflated-CCW
+  //     + hole-CW + hole-inflated-CW), empty.
+  //   - inside hole, OUTSIDE hole-inflated (= halo-wide strip just
+  //     inside the hole boundary): odd (3), filled. This is the
+  //     hole-side band.
+  // Outer/inner polyline orientations are preserved through Clipper
+  // (CCW outer stays CCW; CW hole stays CW), giving the parity above
+  // automatically.
+  const offset = new lib.ClipperOffset(4.0, 0.25);
+  offset.AddPaths(innerSubj, lib.JoinType.jtMiter, lib.EndType.etClosedPolygon);
+  const inflatedClipper: ClipperPaths = [];
+  offset.Execute(inflatedClipper, +delta);
   const polylines: V2d[][] = [];
-  for (const path of annulus) {
+  for (const inner of innerExact) polylines.push([...inner]);
+  for (const path of inflatedClipper) {
     if (path.length < 3) continue;
     const poly: V2d[] = [];
     for (const p of path) poly.push(new V2d(p.X / SCALE, p.Y / SCALE));
@@ -187,6 +212,85 @@ export function buildGlyphBand(
   return tris.map((t) => ({
     vertices: [t.vertices[0]!, t.vertices[1]!, t.vertices[2]!] as const,
   }));
+}
+
+/**
+ * Walk the contour and emit a piecewise-linear polyline that lies
+ * INSIDE the body. Classification matches the mesh tessellator
+ * (triangulate.ts ~line 430):
+ *   - chord polygon = polygon of contour anchor points (each
+ *     edge's start vertex).
+ *   - For each bezier2 edge, check whether the control point P1
+ *     is INSIDE the chord polygon:
+ *       INSIDE  → inward bulge: walk legs (start, p1) — p1 is
+ *                 inside body, so the two legs lie inside.
+ *       OUTSIDE → outward bulge: walk chord (just start) — chord
+ *                 is inside body; the lens between chord and curve
+ *                 is body fill via Loop-Blinn.
+ * Lines / arcs / cubics → walk chord regardless.
+ *
+ * This replaces the local cross-product `bulgesOutward` flag (which
+ * is reliable for CCW outer contours but flips for CW holes and
+ * for self-intersecting subpaths). The `pointInsidePolygon` test
+ * is what the body tessellator uses to decide whether to ADD or
+ * SUBTRACT each curve's lens, so it's the canonical answer.
+ */
+function buildInsideBodyPolyline(
+  contour: ReadonlyArray<OutlineEdge>,
+  curves: ReadonlyArray<CurveTriangle>,
+  allChordPolys: ReadonlyArray<ReadonlyArray<V2d>>,
+): V2d[] {
+  const out: V2d[] = [];
+  for (const edge of contour) {
+    out.push(edge.start);
+    if (edge.curveIndex < 0) continue;
+    const c = curves[edge.curveIndex]!;
+    if (c.kind !== "bezier2") continue;
+    const v0 = c.vertices[0]!;
+    const v1 = c.vertices[1]!;
+    if (v0.x === v1.x && v0.y === v1.y) continue; // line sentinel
+    if (pointInsideBody(v1, allChordPolys)) {
+      out.push(v1);
+    }
+  }
+  return out;
+}
+
+/**
+ * Even-odd parity over all contour chord polygons: a point is in
+ * body iff it's inside an odd number of contour chord polygons.
+ * For a glyph with one outer + N holes, that's:
+ *   - 0 → outside outer (= background)
+ *   - 1 → inside outer, outside any hole (= body)
+ *   - 2 → inside outer + inside one hole (= hole interior)
+ *   - etc. (nested holes-in-holes alternate parity)
+ */
+function pointInsideBody(
+  p: V2d,
+  chordPolys: ReadonlyArray<ReadonlyArray<V2d>>,
+): boolean {
+  let inside = false;
+  for (const poly of chordPolys) {
+    if (pointInsidePolygon(p, poly)) inside = !inside;
+  }
+  return inside;
+}
+
+function vec2dPathToClipper(pts: ReadonlyArray<V2d>, scale: number): ClipperPath {
+  const out: ClipperPath = [];
+  for (const p of pts) {
+    const X = Math.round(p.x * scale);
+    const Y = Math.round(p.y * scale);
+    const last = out.length > 0 ? out[out.length - 1]! : null;
+    if (last !== null && last.X === X && last.Y === Y) continue;
+    out.push({ X, Y });
+  }
+  if (out.length >= 2) {
+    const first = out[0]!;
+    const tail  = out[out.length - 1]!;
+    if (first.X === tail.X && first.Y === tail.Y) out.pop();
+  }
+  return out;
 }
 
 /**

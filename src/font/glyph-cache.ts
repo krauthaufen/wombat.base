@@ -356,10 +356,8 @@ export class GlyphCache {
     this.triRunning += triCount;
 
     // Build the outline band. Every band vertex carries the glyph's
-    // full SSBO range (triFirst, triCount) — the FS iterates all of
-    // them and runs Newton on each. The band geometry's job is just
-    // to cover the halo strip so we don't pay the per-curve cost on
-    // background pixels.
+    // full SSBO range (triFirst, triCount); the FS iterates all of
+    // them and runs the per-candidate distance for each.
     const bandTris = buildGlyphBand(tri.outlineContours, tri.curves, BAND_HALO_EM);
     let nextVi = bufs.vertices.length / GLYPH_FLOATS_PER_VERTEX;
     for (const bt of bandTris) {
