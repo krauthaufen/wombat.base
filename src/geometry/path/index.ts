@@ -41,6 +41,7 @@ export {
 export {
   type FlatTriangle,
   type RibbonTriangle,
+  type OutlineEdge,
   type FaceTriangulation,
   earClip,
   triangulateFace,
@@ -53,5 +54,6 @@ export {
   VERTEX_KIND_BEZIER2,
   VERTEX_KIND_ARC,
   VERTEX_KIND_LINE_RIBBON,
+  VERTEX_KIND_BAND,
   VERTEX_BYTE_SIZE,
 } from "./buffers.js";

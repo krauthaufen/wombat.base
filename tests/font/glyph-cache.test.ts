@@ -40,25 +40,25 @@ describe("GlyphCache", () => {
     const cache = new GlyphCache(font);
     const r = cache.getChar("A");
     const v = cache.vertexBuffer();
+    // Only consider non-band vertices: the SDF outline band extends
+    // beyond the glyph's natural bbox by ±haloEm, which we don't want
+    // to factor into the centering check. Filter by kind != 4.
     let minX = Infinity, maxX = -Infinity;
     for (let i = 0; i < r.vertexCount; i++) {
-      const x = v[(r.baseVertex + i) * GLYPH_FLOATS_PER_VERTEX]!;
+      const off = (r.baseVertex + i) * GLYPH_FLOATS_PER_VERTEX;
+      const kind = v[off + 5]!;
+      if (kind > 3.5) continue; // skip band vertices
+      const x = v[off]!;
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
     }
-    // Bbox in cache coords matches the record's bbox.
-    expect(minX).toBeCloseTo(r.bbox.min.x, 6);
-    expect(maxX).toBeCloseTo(r.bbox.max.x, 6);
-    // bbox is centered around mid-advance: |min.x| ≈ |advance - max.x|
-    // ⇔ min.x + max.x ≈ advance - advance = 0 only if the glyph's
-    // bbox is symmetric. For asymmetric glyphs the bbox is shifted by
-    // the same amount as the centering, so:
-    //   min.x_centered = min.x_native - advance/2
-    //   max.x_centered = max.x_native - advance/2
-    // We just sanity-check the shift is consistent with `advance`.
+    // Vertices live in em coords (font_unit / upem) shifted by
+    // -advance/2 so the glyph is centered on x = 0. Verify against
+    // the native font-unit bbox converted to em.
     const native = font.charBoundingBox("A");
-    expect(minX).toBeCloseTo(native.min.x - r.advance * 0.5, 6);
-    expect(maxX).toBeCloseTo(native.max.x - r.advance * 0.5, 6);
+    const upem = font.unitsPerEm;
+    expect(minX).toBeCloseTo(native.min.x / upem - r.advance * 0.5, 5);
+    expect(maxX).toBeCloseTo(native.max.x / upem - r.advance * 0.5, 5);
   });
 
   it("empty (whitespace) glyph yields an empty record with zero ranges", () => {

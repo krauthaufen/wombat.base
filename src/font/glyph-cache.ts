@@ -27,12 +27,22 @@ import {
   triangulateGlyph,
 } from "../geometry/path/triangulate-glyph.js";
 import {
-  compileTessellation, VERTEX_BYTE_SIZE,
+  compileTessellation, VERTEX_BYTE_SIZE, VERTEX_KIND_BAND,
 } from "../geometry/path/buffers.js";
 import {
   buildGlyphSdf, packSdfSegments, SDF_FLOATS_PER_SEGMENT,
 } from "./glyph-sdf.js";
+import { buildGlyphBand } from "./band-builder.js";
 import type { Font } from "./font.js";
+
+/** Em-space half-width of the SDF outline band. The cache pre-bakes
+ *  the band assuming a maximum AA halo of `BAND_HALO_EM` em-units of
+ *  glyph height — the SDF FS will produce a hard cutoff once the
+ *  fragment's distance exceeds this. ~0.15 em fits comfortably for
+ *  the typical zoom range (≈ 15 px at 100 px-per-em rendering). At
+ *  much higher zoom the band may visibly clip the AA ramp; rebuild
+ *  the cache with a larger value if so. */
+const BAND_HALO_EM = 0.15;
 
 /** Number of f32 lanes per vertex in the cache's atlas — matches
  *  `compileTessellation`'s interleaved layout: x, y, k, l, m, kind. */
@@ -42,14 +52,17 @@ export const GLYPH_FLOATS_PER_VERTEX = VERTEX_BYTE_SIZE / 4;
 export const TRI_FLOATS_PER_TRI = 16;
 
 export interface GlyphRecord {
-  /** First index in the cache's index buffer for this glyph. */
+  /** First index in the cache's FAST index buffer for this glyph
+   *  (flat + curves + ribbons; band triangles are NOT in this range). */
   readonly firstIndex: number;
-  /** Number of indices for this glyph (3 × triangle count). */
+  /** Number of indices for this glyph in the fast index buffer. */
   readonly indexCount: number;
   /** Vertex offset to add to each index for this glyph (passed as
-   *  `baseVertex` to `drawIndexed` / `drawIndexedIndirect`). */
+   *  `baseVertex` to `drawIndexed` / `drawIndexedIndirect`). Same
+   *  baseVertex applies to both the fast and SDF index ranges. */
   readonly baseVertex: number;
-  /** Vertex count contributed by this glyph (informational). */
+  /** Vertex count contributed by this glyph (informational; counts
+   *  every kind, including band vertices). */
   readonly vertexCount: number;
   /** Glyph's horizontal advance in font units. */
   readonly advance: number;
@@ -61,30 +74,42 @@ export interface GlyphRecord {
    *  Layout still uses `advance`; nothing draws. */
   readonly empty: boolean;
   /** First segment index in the cache's SDF segment buffer for this
-   *  glyph. (Used by the alpha-blending fragment-shader SDF path.) */
+   *  glyph. (Used by the legacy alpha-blending fragment-shader SDF
+   *  path; the band-based SDF path doesn't use this.) */
   readonly sdfSegFirst: number;
   /** Number of segments for this glyph in the SDF buffer. */
   readonly sdfSegCount: number;
-  /** Tight glyph bbox (centered in x, native in y) for the SDF
-   *  fullscreen-quad geometry. Padded slightly by the consumer to
-   *  ensure the AA ramp fits inside the rendered quad. */
+  /** Tight glyph bbox (centered in x, native in y) for the legacy
+   *  SDF fullscreen-quad geometry. */
   readonly sdfBbox: { x0: number; y0: number; x1: number; y1: number };
-  /** First triangle index in the cache's packed triangle buffer for
-   *  this glyph (excluding ribbons). */
+  /** First triangle index in the cache's packed triangle SSBO for
+   *  this glyph (flat + curves; ribbons and band tris are excluded). */
   readonly triFirst: number;
-  /** Number of triangles for this glyph in the packed buffer. */
+  /** Number of triangles for this glyph in the packed SSBO. */
   readonly triCount: number;
+  /** First index in the cache's SDF index buffer (band + flat tris,
+   *  contiguous; band tris come first in this slice). */
+  readonly sdfFirstIndex: number;
+  /** Number of indices for this glyph in the SDF index buffer. */
+  readonly sdfIndexCount: number;
+  /** Band triangle count (informational). */
+  readonly bandTriCount: number;
 }
 
 export class GlyphCache {
   /** Code-point → cached record. */
   private readonly records = new Map<number, GlyphRecord>();
-  /** Atlas vertex storage — interleaved [x,y,k,l,m,kind] per vertex.
-   *  Backed by a growable plain array; consumers read via
-   *  `vertexBuffer()` which returns a Float32Array snapshot. */
+  /** Atlas vertex storage — interleaved 12 f32 per vertex (3 vec4):
+   *    pos.xy, klm.xyz, kind, chordA.xy, chordB.xy, cand0, cand1.
+   *  See `buffers.ts` for the full layout. Backed by a growable plain
+   *  array; consumers read via `vertexBuffer()`. */
   private readonly vertices: number[] = [];
-  /** Atlas index storage. */
+  /** Atlas FAST index storage — flat + curves + ribbons. Drives the
+   *  Loop-Blinn render path. Band triangles are NOT in this buffer. */
   private readonly indices: number[] = [];
+  /** Atlas SDF index storage — band + flat (in that order, per glyph).
+   *  Drives the band-based per-pixel SDF render path. */
+  private readonly sdfIndicesArr: number[] = [];
   /** Per-font SDF segment storage — flat float-array of packed
    *  `SDF_FLOATS_PER_SEGMENT` floats per segment. Grows append-only
    *  alongside the triangle atlas; `record.sdfSegFirst` /
@@ -130,6 +155,10 @@ export class GlyphCache {
    *  glyph (0..glyph.vertexCount-1); apply `record.baseVertex` at
    *  draw time. */
   indexBuffer(): Uint32Array { return new Uint32Array(this.indices); }
+  /** Snapshot of the SDF (band + flat) index buffer. Same baseVertex
+   *  per glyph as `indexBuffer()`; the per-glyph slice is described by
+   *  `record.sdfFirstIndex` / `sdfIndexCount`. */
+  sdfIndexBuffer(): Uint32Array { return new Uint32Array(this.sdfIndicesArr); }
 
   /** Snapshot of the SDF segment buffer for the alpha-blending path.
    *  Layout: `SDF_FLOATS_PER_SEGMENT` floats per segment, indexed by
@@ -143,68 +172,74 @@ export class GlyphCache {
    * Layout (`TRI_FLOATS_PER_TRI = 16` floats = 4 × vec4 per triangle):
    *   `[v0.xy, klm0.xy, v1.xy, klm1.xy, v2.xy, klm2.xy,
    *     klm0.z, klm1.z, klm2.z, kind]`
-   * Triangles with `kind = 3` (line ribbons) are SKIPPED — their
-   * geometry is degenerate before the VS expansion, and the per-
-   * pixel path doesn't reproduce that expansion. Polygon line edges
-   * end up hard-pixel-aligned in this mode.
+   * Triangles with `kind = 3` (line ribbons) and `kind = 4` (band)
+   * are SKIPPED — neither carries Loop-Blinn klm coordinates, and the
+   * SSBO is consumed only for kind=4 fragments looking up their
+   * candidate curve triangles by global SSBO index.
    */
   trianglePackedBuffer(): Float32Array {
     const verts = this.vertices;
     const indices = this.indices;
-    const triCount = indices.length / 3;
-    // First pass: count non-ribbon triangles.
     let nKept = 0;
-    for (let t = 0; t < triCount; t++) {
-      const i0 = indices[t * 3]!;
-      const kind = verts[i0 * GLYPH_FLOATS_PER_VERTEX + 5]!;
-      if (kind > 2.5 && kind < 3.5) continue;  // skip ribbons
-      nKept++;
+    for (const rec of this.records.values()) {
+      if (rec.empty) continue;
+      const localTris = rec.indexCount / 3;
+      for (let t = 0; t < localTris; t++) {
+        const li0 = indices[rec.firstIndex + t * 3]!;
+        const kind = verts[(li0 + rec.baseVertex) * GLYPH_FLOATS_PER_VERTEX + 5]!;
+        if (kind > 2.5) continue;  // skip ribbons (3) and band (4)
+        nKept++;
+      }
     }
     const out = new Float32Array(nKept * TRI_FLOATS_PER_TRI);
     let w = 0;
-    for (let t = 0; t < triCount; t++) {
-      const i0 = indices[t * 3]!;
-      const i1 = indices[t * 3 + 1]!;
-      const i2 = indices[t * 3 + 2]!;
-      const o0 = i0 * GLYPH_FLOATS_PER_VERTEX;
-      const o1 = i1 * GLYPH_FLOATS_PER_VERTEX;
-      const o2 = i2 * GLYPH_FLOATS_PER_VERTEX;
-      const kind = verts[o0 + 5]!;
-      if (kind > 2.5 && kind < 3.5) continue;  // skip ribbons
-      // vec4 0: v0.xy, klm0.xy
-      out[w + 0]  = verts[o0 + 0]!;
-      out[w + 1]  = verts[o0 + 1]!;
-      out[w + 2]  = verts[o0 + 2]!;
-      out[w + 3]  = verts[o0 + 3]!;
-      // vec4 1: v1.xy, klm1.xy
-      out[w + 4]  = verts[o1 + 0]!;
-      out[w + 5]  = verts[o1 + 1]!;
-      out[w + 6]  = verts[o1 + 2]!;
-      out[w + 7]  = verts[o1 + 3]!;
-      // vec4 2: v2.xy, klm2.xy
-      out[w + 8]  = verts[o2 + 0]!;
-      out[w + 9]  = verts[o2 + 1]!;
-      out[w + 10] = verts[o2 + 2]!;
-      out[w + 11] = verts[o2 + 3]!;
-      // vec4 3: klm0.z, klm1.z, klm2.z, kind
-      out[w + 12] = verts[o0 + 4]!;
-      out[w + 13] = verts[o1 + 4]!;
-      out[w + 14] = verts[o2 + 4]!;
-      out[w + 15] = kind;
-      w += TRI_FLOATS_PER_TRI;
+    for (const rec of this.records.values()) {
+      if (rec.empty) continue;
+      const localTris = rec.indexCount / 3;
+      for (let t = 0; t < localTris; t++) {
+        const li0 = indices[rec.firstIndex + t * 3]!;
+        const li1 = indices[rec.firstIndex + t * 3 + 1]!;
+        const li2 = indices[rec.firstIndex + t * 3 + 2]!;
+        const o0 = (li0 + rec.baseVertex) * GLYPH_FLOATS_PER_VERTEX;
+        const o1 = (li1 + rec.baseVertex) * GLYPH_FLOATS_PER_VERTEX;
+        const o2 = (li2 + rec.baseVertex) * GLYPH_FLOATS_PER_VERTEX;
+        const kind = verts[o0 + 5]!;
+        if (kind > 2.5) continue;
+        out[w + 0]  = verts[o0 + 0]!;
+        out[w + 1]  = verts[o0 + 1]!;
+        out[w + 2]  = verts[o0 + 2]!;
+        out[w + 3]  = verts[o0 + 3]!;
+        out[w + 4]  = verts[o1 + 0]!;
+        out[w + 5]  = verts[o1 + 1]!;
+        out[w + 6]  = verts[o1 + 2]!;
+        out[w + 7]  = verts[o1 + 3]!;
+        out[w + 8]  = verts[o2 + 0]!;
+        out[w + 9]  = verts[o2 + 1]!;
+        out[w + 10] = verts[o2 + 2]!;
+        out[w + 11] = verts[o2 + 3]!;
+        out[w + 12] = verts[o0 + 4]!;
+        out[w + 13] = verts[o1 + 4]!;
+        out[w + 14] = verts[o2 + 4]!;
+        out[w + 15] = kind;
+        w += TRI_FLOATS_PER_TRI;
+      }
     }
     return out;
   }
-  /** Total triangle count across all cached glyphs (excluding ribbons). */
+  /** Total triangle count across all cached glyphs (excluding ribbons + band). */
   get totalTriCount(): number {
     const indices = this.indices;
     const verts = this.vertices;
     let n = 0;
-    for (let t = 0; t < indices.length / 3; t++) {
-      const i0 = indices[t * 3]!;
-      const kind = verts[i0 * GLYPH_FLOATS_PER_VERTEX + 5]!;
-      if (kind > 2.5 && kind < 3.5) continue;
-      n++;
+    for (const rec of this.records.values()) {
+      if (rec.empty) continue;
+      const localTris = rec.indexCount / 3;
+      for (let t = 0; t < localTris; t++) {
+        const li0 = indices[rec.firstIndex + t * 3]!;
+        const kind = verts[(li0 + rec.baseVertex) * GLYPH_FLOATS_PER_VERTEX + 5]!;
+        if (kind > 2.5) continue;
+        n++;
+      }
     }
     return n;
   }
@@ -236,48 +271,132 @@ export class GlyphCache {
         sdfBbox: { x0: 0, y0: 0, x1: 0, y1: 0 },
         triFirst: this.triRunning,
         triCount: 0,
+        sdfFirstIndex: this.sdfIndicesArr.length,
+        sdfIndexCount: 0,
+        bandTriCount: 0,
       };
     }
 
     // Shift segments left by advance/2 so glyph is centered on x=0.
     const centered = shiftSegmentsX(segs, -advance * 0.5);
 
-    const tri = triangulateGlyph(centered);
+    const triRaw = triangulateGlyph(centered);
+    // Append a "line sentinel" curve entry per line edge: a degenerate
+    // bezier2 with p1 = p0 marks "line from p0 to p2". The FS detects
+    // it via VERTEX_KIND_LINE (set by compileTessellation) and uses a
+    // closed-form point-segment distance — cheaper than Newton and
+    // avoids NaN from a collinear quadratic.
+    //
+    // Important: do NOT rewrite the outline edge's curveIndex. The
+    // band-builder relies on `curveIndex < 0` to take its chord
+    // branch; if we point line edges at a synthesized quadratic with
+    // p1=p0 the band-builder's tangent at t=0 is zero, the perp
+    // normal goes invalid, and the chunk + neighbouring miter both
+    // get skipped → visible coverage gaps and missing miters.
+    const synthCurves: typeof triRaw.curves[number][] =
+      [...triRaw.curves];
+    const synthOutline = triRaw.outlineContours.map((contour) =>
+      contour.map((edge) => {
+        if (edge.curveIndex >= 0) return edge;
+        const idx = synthCurves.length;
+        synthCurves.push({
+          kind: "bezier2",
+          vertices: [edge.start, edge.start, edge.end],
+          texcoords: [[0, 0, 1], [0, 0, 1], [1, 1, 1]],
+          bulgesOutward: false,
+        });
+        return { ...edge, curveIndex: idx };
+      })
+    );
+    const tri = {
+      ...triRaw,
+      curves: synthCurves,
+      outlineContours: synthOutline,
+    };
     const bufs = compileTessellation(tri);
 
     const baseVertex = this.vertices.length / GLYPH_FLOATS_PER_VERTEX;
     const firstIndex = this.indices.length;
-    const vertexCount = bufs.vertices.length / GLYPH_FLOATS_PER_VERTEX;
+    const sdfFirstIndex = this.sdfIndicesArr.length;
 
-    // Append vertices verbatim — they're already in centered coords
-    // because we centered the input segments.
+    // Append fast-path vertices (flat + curves + ribbons) verbatim.
     for (let i = 0; i < bufs.vertices.length; i++) {
       this.vertices.push(bufs.vertices[i]!);
     }
-    // Indices are already local to this glyph (0..vertexCount-1) as
-    // produced by `compileTessellation`. We append unchanged.
+    // Append fast-path indices (flat + curves + ribbons) unchanged.
     for (let i = 0; i < bufs.indices.length; i++) {
       this.indices.push(bufs.indices[i]!);
     }
 
     // SDF segments built from the same centered path; appended into
-    // the per-font SDF buffer. Used by the alpha-blending render path.
+    // the per-font SDF buffer (legacy SDF path; band path doesn't use).
     const sdfSegFirst = this.sdfFloats.length / SDF_FLOATS_PER_SEGMENT;
     const sdf = buildGlyphSdf(centered);
     const packed = packSdfSegments(sdf.segments);
     for (let i = 0; i < packed.length; i++) this.sdfFloats.push(packed[i]!);
 
-    // Count non-ribbon triangles in this glyph's slice for triFirst
-    // / triCount addressing of the packed triangle buffer.
+    // Per-glyph SSBO range: flat + curves only (skip ribbons; bands
+    // emit later and we skip those too). We also need each curve's
+    // index in this slice so we can rebase the band-builder's local
+    // candidate indices to global SSBO indices.
     const triFirst = this.triRunning;
     let triCount = 0;
+    // Curve local index within this glyph's SSBO slice = flatN + ci
+    // (where ci is the index into the original `tri.curves` array,
+    // matching `buildGlyphBand`'s `cand0` values).
+    const flatTriCount = tri.flat.length;
     for (let t = 0; t < bufs.indices.length / 3; t++) {
       const i0 = bufs.indices[t * 3]!;
       const kind = bufs.vertices[i0 * GLYPH_FLOATS_PER_VERTEX + 5]!;
-      if (kind > 2.5 && kind < 3.5) continue;  // skip ribbons
+      // Keep flat (0), bezier2 (1), arc (2), line (5). Skip ribbons
+      // (3) — no SDF role — and band (4) — appended later.
+      if (kind > 2.5) continue;
       triCount++;
     }
     this.triRunning += triCount;
+
+    // Build the outline band. Every band vertex carries the glyph's
+    // full SSBO range (triFirst, triCount) — the FS iterates all of
+    // them and runs Newton on each. The band geometry's job is just
+    // to cover the halo strip so we don't pay the per-curve cost on
+    // background pixels.
+    const bandTris = buildGlyphBand(tri.outlineContours, tri.curves, BAND_HALO_EM);
+    let nextVi = bufs.vertices.length / GLYPH_FLOATS_PER_VERTEX;
+    for (const bt of bandTris) {
+      for (let k = 0; k < 3; k++) {
+        const p = bt.vertices[k]!;
+        this.vertices.push(
+          p.x, p.y,
+          0, 0, 0,                 // klm unused for kind=4
+          VERTEX_KIND_BAND,
+          triFirst, triCount,      // SSBO range to scan
+          0, 0, 0, 0,              // remaining slots reserved
+        );
+        this.sdfIndicesArr.push(nextVi);
+        nextVi++;
+      }
+    }
+    const bandTriCount = bandTris.length;
+
+    // Append SDF range's solid-fill tris: flat (kind=0) + curves
+    // (kind=1/2). The curve triangles' chord-detoured lens is the
+    // only thing filling outward-bulge interiors — without them the
+    // body has a gap between the chord and the curve. The FS treats
+    // every non-band fragment as solid α=1, so the Loop-Blinn klm
+    // discard is intentionally bypassed; the band ±halo strip
+    // handles the AA boundary.
+    const flatRange = bufs.interiorRange;
+    const curveRange = bufs.curveRange;
+    for (let i = 0; i < flatRange.indexCount; i++) {
+      this.sdfIndicesArr.push(bufs.indices[flatRange.firstIndex + i]!);
+    }
+    for (let i = 0; i < curveRange.indexCount; i++) {
+      this.sdfIndicesArr.push(bufs.indices[curveRange.firstIndex + i]!);
+    }
+    const sdfIndexCount =
+      bandTriCount * 3 + flatRange.indexCount + curveRange.indexCount;
+
+    const vertexCount = nextVi;
 
     // Bbox of the centered glyph: native bbox shifted by -advance/2.
     const nat = this.font.charBoundingBox(ch);
@@ -299,6 +418,9 @@ export class GlyphCache {
       sdfBbox: sdf.bbox,
       triFirst,
       triCount,
+      sdfFirstIndex,
+      sdfIndexCount,
+      bandTriCount,
     };
   }
 }

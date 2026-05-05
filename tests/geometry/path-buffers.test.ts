@@ -6,14 +6,16 @@ import {
   compileTessellation,
   VERTEX_KIND_INTERIOR, VERTEX_KIND_BEZIER2, VERTEX_KIND_ARC,
   VERTEX_KIND_LINE_RIBBON,
+  VERTEX_BYTE_SIZE,
 } from "../../src/geometry/path/index.js";
 
+const FLOATS_PER_VERT = VERTEX_BYTE_SIZE / 4;
 function readKind(vertices: Float32Array, vertexIndex: number): number {
-  return vertices[vertexIndex * 6 + 5]!;
+  return vertices[vertexIndex * FLOATS_PER_VERT + 5]!;
 }
 
 function readPosition(vertices: Float32Array, vertexIndex: number): [number, number] {
-  return [vertices[vertexIndex * 6 + 0]!, vertices[vertexIndex * 6 + 1]!];
+  return [vertices[vertexIndex * FLOATS_PER_VERT + 0]!, vertices[vertexIndex * FLOATS_PER_VERT + 1]!];
 }
 
 describe("compileTessellation", () => {
@@ -40,7 +42,7 @@ describe("compileTessellation", () => {
       expect(readKind(bufs.vertices, i)).toBe(VERTEX_KIND_INTERIOR);
     }
     // The remaining 24 vertices are line ribbons.
-    const total = bufs.vertices.length / 6;
+    const total = bufs.vertices.length / FLOATS_PER_VERT;
     for (let i = 6; i < total; i++) {
       expect(readKind(bufs.vertices, i)).toBe(VERTEX_KIND_LINE_RIBBON);
     }
@@ -89,8 +91,8 @@ describe("compileTessellation", () => {
     for (let t = 0; t < 2; t++) {
       const v0 = interiorVertCount + t * 3;
       const v2 = interiorVertCount + t * 3 + 2;
-      const k0 = bufs.vertices[v0 * 6 + 2]!, l0 = bufs.vertices[v0 * 6 + 3]!;
-      const k2 = bufs.vertices[v2 * 6 + 2]!, l2 = bufs.vertices[v2 * 6 + 3]!;
+      const k0 = bufs.vertices[v0 * FLOATS_PER_VERT + 2]!, l0 = bufs.vertices[v0 * FLOATS_PER_VERT + 3]!;
+      const k2 = bufs.vertices[v2 * FLOATS_PER_VERT + 2]!, l2 = bufs.vertices[v2 * FLOATS_PER_VERT + 3]!;
       expect(k0 * k0 + l0 * l0).toBeCloseTo(1, 6);
       expect(k2 * k2 + l2 * l2).toBeCloseTo(1, 6);
     }

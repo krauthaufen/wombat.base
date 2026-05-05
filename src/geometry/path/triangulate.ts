@@ -68,6 +68,24 @@ export interface RibbonTriangle {
   readonly isOuter: readonly [number, number, number];
 }
 
+/**
+ * One directed sub-edge of a closed contour. Each line `PathSegment`
+ * contributes one edge with `curveIndex = -1`. Each curve `PathSegment`
+ * contributes one edge per `CurveTriangle` produced by `classifyCurve`
+ * (cubics may split, arcs may subdivide), with `curveIndex` pointing
+ * at the corresponding entry in `FaceTriangulation.curves`.
+ *
+ * Edges within a contour are listed in walk order; consumers build
+ * miter joins between consecutive edges and use `curveIndex` to find
+ * each edge's parent curve triangle for SDF lookup.
+ */
+export interface OutlineEdge {
+  readonly start: V2d;
+  readonly end: V2d;
+  /** Index into `FaceTriangulation.curves`, or -1 for a line edge. */
+  readonly curveIndex: number;
+}
+
 export interface FaceTriangulation {
   /** Interior triangles of the flat polygon approximation. */
   readonly flat: ReadonlyArray<FlatTriangle>;
@@ -79,6 +97,12 @@ export interface FaceTriangulation {
   /** Outline ribbons along boundary LINE edges (skipped for curves
    *  and bridges). Empty when the face has no straight boundary. */
   readonly ribbons: ReadonlyArray<RibbonTriangle>;
+  /** Closed contours in walk order. Each contour is an ordered
+   *  sequence of directed sub-edges; `edges[i].end ≈ edges[i+1].start`
+   *  and the last edge wraps to the first. Used by the band builder
+   *  to emit a mitered halo strip per glyph outline. Empty when no
+   *  contour data is requested by the producer. */
+  readonly outlineContours: ReadonlyArray<ReadonlyArray<OutlineEdge>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -572,7 +596,7 @@ export function triangulateFace(
     vertices: [polygon[a]!, polygon[b]!, polygon[c]!] as const,
   }));
   const ribbons = buildLineRibbons(face, extraction, graph);
-  return { flat, curves, ribbons };
+  return { flat, curves, ribbons, outlineContours: [] };
 }
 
 /**
@@ -596,5 +620,5 @@ export function triangulateFilledFaces(
     curves.push(...tri.curves);
     ribbons.push(...tri.ribbons);
   }
-  return { flat, curves, ribbons };
+  return { flat, curves, ribbons, outlineContours: [] };
 }

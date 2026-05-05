@@ -12,7 +12,7 @@
 import { V2d } from "../../vector/v2d.js";
 import type { PathSegment } from "./segment.js";
 import type {
-  RibbonTriangle, FaceTriangulation,
+  RibbonTriangle, FaceTriangulation, OutlineEdge,
 } from "./triangulate.js";
 import {
   type CurveTriangle, classifyCurve, chordPoints,
@@ -200,15 +200,31 @@ function buildLineRibbonsForContour(contour: ReadonlyArray<PathSegment>): Ribbon
 export function triangulateGlyph(segments: ReadonlyArray<PathSegment>): FaceTriangulation {
   const contours = splitContours(segments);
   if (contours.length === 0) {
-    return { flat: [], curves: [], ribbons: [] };
+    return { flat: [], curves: [], ribbons: [], outlineContours: [] };
   }
   const chordPolys = contours.map(chordPolyline);
   const fillPolys = contours.map((c) => fillPolyline(c, chordPolys));
   const flat = tessellateContoursLibtess(fillPolys, "non-zero");
   const curves: CurveTriangle[] = [];
+  // Per-contour ordered list of (start, end, curveIndex) edges.
+  // curveIndex points into `curves` for curve sub-pieces, -1 for line
+  // segments. Each entry in `classifyCurve` produces one edge that
+  // covers exactly that sub-triangle's start→end span; cubic-split or
+  // arc-subdivided segments emit multiple edges.
+  const outlineContours: OutlineEdge[][] = [];
   for (const contour of contours) {
+    const edges: OutlineEdge[] = [];
     for (const seg of contour) {
-      for (const c of classifyCurve(seg)) {
+      const subs = classifyCurve(seg);
+      if (subs.length === 0) {
+        // Line segment.
+        edges.push({ start: seg.start, end: seg.end, curveIndex: -1 });
+        continue;
+      }
+      // Curve segment: emit one edge per sub-triangle, recording the
+      // curve's index as we push it into `curves`.
+      for (const c of subs) {
+        const ci = curves.length;
         if (isInsideGlyphFill(c.vertices[1]!, chordPolys)) {
           curves.push({
             ...c,
@@ -221,12 +237,18 @@ export function triangulateGlyph(segments: ReadonlyArray<PathSegment>): FaceTria
         } else {
           curves.push(c);
         }
+        edges.push({
+          start: c.vertices[0]!,
+          end:   c.vertices[2]!,
+          curveIndex: ci,
+        });
       }
     }
+    outlineContours.push(edges);
   }
   const ribbons: RibbonTriangle[] = [];
   for (const contour of contours) {
     ribbons.push(...buildLineRibbonsForContour(contour));
   }
-  return { flat, curves, ribbons };
+  return { flat, curves, ribbons, outlineContours };
 }

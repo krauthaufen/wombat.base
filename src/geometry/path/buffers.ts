@@ -1,15 +1,17 @@
 // Convert tessellation output to GPU-ready interleaved buffers.
 //
-// The fragment shader needs three things per vertex:
-//   - position  (vec2<f32>) — world-space xy
-//   - klm       (vec3<f32>) — Loop-Blinn texcoord (or
-//                            (outwardX, outwardY, isOuter) when
-//                            kind = 3, line ribbon)
-//   - kind      (f32)       — 0 interior, 1 bezier2, 2 arc,
-//                            3 line ribbon
+// Per-vertex layout (12 f32 = 48 bytes, 3 vec4):
+//   - vec4_0:  pos.xy, klm.xy
+//   - vec4_1:  klm.z, kind, cand0, cand1
+//   - vec4_2:  cand2, cand3, cand4, cand5
 //
-// We pack them into one interleaved array (6 f32 = 24 bytes per
-// vertex) and produce a single Uint32Array of triangle indices.
+// The first 6 floats `(pos.xy, klm.xyz, kind)` are the legacy
+// "fast-path" layout. kinds 0..3 are unchanged. kind = 4 (BAND)
+// carries up to 6 candidate curve-triangle SSBO indices for the
+// per-pixel SDF text path — the FS runs Newton against each cand_i
+// >= 0 and takes the min. Lines are synthesised as degenerate
+// quadratic curves so they have a real curveIndex too. For kinds
+// 0..3 every cand slot is -1.
 // Three triangle ranges are reported separately — `interiorRange`,
 // `curveRange`, `ribbonRange` — for callers that want to render
 // them with separate pipelines (the unified Loop-Blinn shader
@@ -49,26 +51,26 @@ export const VERTEX_KIND_ARC          = 2;
  */
 export const VERTEX_KIND_LINE_RIBBON  = 3;
 /**
- * Distance-field halo vertex. `klm.x` carries signed perpendicular
- * distance to the glyph boundary in WORLD units (positive = outside,
- * negative = inside). klm.y / klm.z are unused. The FS evaluates
- *   `α = clamp(0.5 − klm.x / (fwidth(klm.x) · AaWidthPx), 0, 1)`,
- * giving an AA ramp of width `AaWidthPx` framebuffer pixels centred
- * on the polygon edge — same recipe as the curve-implicit AA, but
- * with a linear distance field instead of a Loop-Blinn polynomial.
- * Used for halo triangles whose two polygon-adjacent vertices form
- * one polygon edge; the third (halo) vertex carries its world-space
- * perpendicular distance to that edge as klm.x.
+ * Per-pixel SDF band vertex. The band is a strip of mitered quads
+ * tracing the glyph outline ±halo_em; each band triangle carries a
+ * chord segment `(A, B)` and up to 2 candidate curve-triangle SSBO
+ * indices in its tail slots. The FS computes pixel distance to the
+ * chord and to each candidate's bezier (Newton in pixel space), takes
+ * the min, and ramps α 1→0 across `AaWidthPx`.
  */
-export const VERTEX_KIND_DISTANCE_FIELD = 4;
+export const VERTEX_KIND_BAND = 4;
 
-export const VERTEX_BYTE_SIZE = 24; // 6 × f32
+export const VERTEX_BYTE_SIZE = 48; // 12 × f32
 
 export interface TessellationBuffers {
-  /** Interleaved vertex data: per vertex, 6 f32:
-   *  `[x, y, klm.x, klm.y, klm.z, kind]`. For `kind = 3`
-   *  (line ribbon), the `klm` slot carries
-   *  `(outwardX, outwardY, isOuter)`. */
+  /** Interleaved vertex data: per vertex, 12 f32 (3 vec4):
+   *  `[x, y, klm.x, klm.y, klm.z, kind,
+   *    cand0, cand1, cand2, cand3, cand4, cand5]`. For `kind = 3`
+   *  (line ribbon) the `klm` slot carries
+   *  `(outwardX, outwardY, isOuter)`. For kinds 0..3 every cand
+   *  slot is -1. For `kind = 4` (band) the cand slots are SSBO
+   *  indices into the per-cache curve-triangle storage; the FS
+   *  runs Newton on each cand_i >= 0 and takes the min. */
   readonly vertices: Float32Array;
   /** Index buffer: 3 indices per triangle. */
   readonly indices: Uint32Array;
@@ -98,13 +100,24 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
   const totalTriCount = flatTriCount + curveTriCount + ribbonTriCount;
   const totalVertCount = totalTriCount * 3;
 
-  const vertices = new Float32Array(totalVertCount * 6); // x, y, klm.x, klm.y, klm.z, kind
+  const FLOATS = 12;
+  const vertices = new Float32Array(totalVertCount * FLOATS);
   const indices = new Uint32Array(totalTriCount * 3);
   const curveBulgeOutward = new Uint8Array(curveTriCount);
 
   let vi = 0; // vertex slot pointer (in elements)
   let ii = 0; // index pointer
   let nextIdx = 0; // next unused vertex index
+
+  // Helper: set every cand slot to -1 for non-band vertex kinds.
+  const writeNoBand = (off: number): void => {
+    vertices[off + 6]  = -1;
+    vertices[off + 7]  = -1;
+    vertices[off + 8]  = -1;
+    vertices[off + 9]  = -1;
+    vertices[off + 10] = -1;
+    vertices[off + 11] = -1;
+  };
 
   // ---- Interior triangles ----
   for (const tri of t.flat) {
@@ -118,7 +131,8 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
       vertices[vi + 3] = 1;
       vertices[vi + 4] = 1;
       vertices[vi + 5] = VERTEX_KIND_INTERIOR;
-      vi += 6;
+      writeNoBand(vi);
+      vi += FLOATS;
       indices[ii++] = nextIdx++;
     }
   }
@@ -139,7 +153,8 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
       vertices[vi + 3] = klm[1];
       vertices[vi + 4] = klm[2];
       vertices[vi + 5] = kind;
-      vi += 6;
+      writeNoBand(vi);
+      vi += FLOATS;
       indices[ii++] = nextIdx++;
     }
   }
@@ -160,7 +175,8 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
       vertices[vi + 3] = o.y;
       vertices[vi + 4] = tri.isOuter[k]!;
       vertices[vi + 5] = VERTEX_KIND_LINE_RIBBON;
-      vi += 6;
+      writeNoBand(vi);
+      vi += FLOATS;
       indices[ii++] = nextIdx++;
     }
   }

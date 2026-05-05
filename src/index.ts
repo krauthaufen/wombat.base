@@ -157,6 +157,7 @@ export {
   classifyCurve,
   cubicToQuadratics,
   type FlatTriangle,
+  type OutlineEdge,
   type FaceTriangulation,
   earClip,
   triangulateFace,
@@ -167,6 +168,7 @@ export {
   VERTEX_KIND_INTERIOR,
   VERTEX_KIND_BEZIER2,
   VERTEX_KIND_ARC,
+  VERTEX_KIND_BAND,
   VERTEX_BYTE_SIZE,
 } from "./geometry/path/index.js";
 
