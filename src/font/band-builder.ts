@@ -438,8 +438,14 @@ function buildInsideBodyPolyline(
     // j's e12 control point landing at the stem's left x. The body
     // tessellator's `m` is the canonical answer for the same query.
     const m = c.texcoords[0]![2]!;
-    if (m < 0) {
-      // Inward bulge: legs through the interior to p1.
+    // FLIPPED rule: inner polyline is the *outer* boundary of the
+    // lens region, never the body. Outward bulge → legs (lens sits
+    // between chord and legs, which is body fill). Inward bulge →
+    // chord (lens sits between chord and legs, which is NOT body).
+    // No body↔band overlap; the lens triangle owns the gap and is
+    // expected to handle its own AA in a follow-up FS change.
+    if (m > 0) {
+      // Outward bulge: legs through p1 (which sits OUTSIDE chord).
       out.push(v1);
       tagVertex(v1, edge.curveIndex);
     }

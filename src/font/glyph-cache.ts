@@ -42,7 +42,7 @@ import type { Font } from "./font.js";
  *  the typical zoom range (≈ 15 px at 100 px-per-em rendering). At
  *  much higher zoom the band may visibly clip the AA ramp; rebuild
  *  the cache with a larger value if so. */
-const BAND_HALO_EM = 0.05;
+const BAND_HALO_EM = 0.1;
 
 /** Number of f32 lanes per vertex in the cache's atlas — matches
  *  `compileTessellation`'s interleaved layout: x, y, k, l, m, kind. */
@@ -326,6 +326,37 @@ export class GlyphCache {
     const sdfFirstIndex = this.sdfIndicesArr.length;
 
     // Append fast-path vertices (flat + curves + ribbons) verbatim.
+    // For lens verts (kind = 1/2) `compileTessellation` parked the
+    // LOCAL curve index in slot[6]; rewrite it into a global SSBO
+    // index here, and fill slot[7]/[8] with the prev/next adjacent
+    // contour curves' SSBO indices. Lets the lens FS run the same
+    // Newton-distance / AA-ramp pipeline the band uses for its own
+    // outside-curve fragments.
+    const lensSsboBase = this.triRunning + tri.flat.length;
+    // Build a map: local curve index → [prev, next] local curve idx.
+    const adjacency = new Map<number, [number, number]>();
+    for (const contour of tri.outlineContours) {
+      const N = contour.length;
+      for (let i = 0; i < N; i++) {
+        const ci = contour[i]!.curveIndex;
+        if (ci < 0) continue;
+        const prevCi = contour[(i - 1 + N) % N]!.curveIndex;
+        const nextCi = contour[(i + 1) % N]!.curveIndex;
+        adjacency.set(ci, [prevCi, nextCi]);
+      }
+    }
+    for (let i = 0; i < bufs.vertices.length; i += GLYPH_FLOATS_PER_VERTEX) {
+      const kind = bufs.vertices[i + 5]!;
+      if (kind > 0.5 && kind < 2.5) {
+        const localCi = bufs.vertices[i + 6]!;
+        const adj = adjacency.get(localCi);
+        const prevLocal = adj ? adj[0] : -1;
+        const nextLocal = adj ? adj[1] : -1;
+        bufs.vertices[i + 6] = lensSsboBase + localCi;
+        bufs.vertices[i + 7] = prevLocal >= 0 ? lensSsboBase + prevLocal : -1;
+        bufs.vertices[i + 8] = nextLocal >= 0 ? lensSsboBase + nextLocal : -1;
+      }
+    }
     for (let i = 0; i < bufs.vertices.length; i++) {
       this.vertices.push(bufs.vertices[i]!);
     }

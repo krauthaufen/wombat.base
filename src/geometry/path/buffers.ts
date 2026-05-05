@@ -153,7 +153,13 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
       vertices[vi + 3] = klm[1];
       vertices[vi + 4] = klm[2];
       vertices[vi + 5] = kind;
+      // slot[6] = LOCAL curve index. glyph-cache rewrites this into
+      // a global SSBO index (and fills slot[7..8] with prev/next
+      // adjacent curves) before upload, so the lens FS can run the
+      // same Newton-distance / AA-ramp logic the band uses for its
+      // outside-curve fragments. Slots [7..11] stay -1 here.
       writeNoBand(vi);
+      vertices[vi + 6] = ci;
       vi += FLOATS;
       indices[ii++] = nextIdx++;
     }
