@@ -42,7 +42,7 @@ import type { Font } from "./font.js";
  *  the typical zoom range (≈ 15 px at 100 px-per-em rendering). At
  *  much higher zoom the band may visibly clip the AA ramp; rebuild
  *  the cache with a larger value if so. */
-const BAND_HALO_EM = 0.15;
+const BAND_HALO_EM = 0.4;
 
 /** Number of f32 lanes per vertex in the cache's atlas — matches
  *  `compileTessellation`'s interleaved layout: x, y, k, l, m, kind. */
@@ -355,20 +355,28 @@ export class GlyphCache {
     }
     this.triRunning += triCount;
 
-    // Build the outline band. Every band vertex carries the glyph's
-    // full SSBO range (triFirst, triCount); the FS iterates all of
-    // them and runs the per-candidate distance for each.
+    // Build the outline band. Each band tri carries up to 4 candidate
+    // curve/line SSBO indices derived from its inner-side vertices
+    // (anchor points contribute their two adjacent edges' curves;
+    // leg-control vertices contribute the one edge they belong to).
+    // The FS iterates only those 4 — bounded per-fragment cost.
+    // Local curve index → global SSBO index = triFirst + flatTriCount + ci.
     const bandTris = buildGlyphBand(tri.outlineContours, tri.curves, BAND_HALO_EM);
+    const ssboCurveBase = triFirst + flatTriCount;
     let nextVi = bufs.vertices.length / GLYPH_FLOATS_PER_VERTEX;
     for (const bt of bandTris) {
+      const c0 = bt.candidates[0] >= 0 ? ssboCurveBase + bt.candidates[0] : -1;
+      const c1 = bt.candidates[1] >= 0 ? ssboCurveBase + bt.candidates[1] : -1;
+      const c2 = bt.candidates[2] >= 0 ? ssboCurveBase + bt.candidates[2] : -1;
+      const c3 = bt.candidates[3] >= 0 ? ssboCurveBase + bt.candidates[3] : -1;
       for (let k = 0; k < 3; k++) {
         const p = bt.vertices[k]!;
         this.vertices.push(
           p.x, p.y,
           0, 0, 0,                 // klm unused for kind=4
           VERTEX_KIND_BAND,
-          triFirst, triCount,      // SSBO range to scan
-          0, 0, 0, 0,              // remaining slots reserved
+          c0, c1, c2, c3,          // up to 4 candidate SSBO indices
+          0, 0,                    // slots [10..11] reserved
         );
         this.sdfIndicesArr.push(nextVi);
         nextVi++;

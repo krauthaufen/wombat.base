@@ -48,6 +48,7 @@ import type {
 import type { CurveTriangle } from "../geometry/path/loop-blinn.js";
 import { tessellateContoursLibtess } from "../geometry/path/libtess-fill.js";
 import { pointInsidePolygon } from "../geometry/path/triangulate.js";
+import { triToCurveDistSq } from "./band-candidates.js";
 import ClipperLib from "clipper-lib";
 
 interface ClipperPt { X: number; Y: number; }
@@ -57,6 +58,23 @@ type ClipperPaths = ClipperPath[];
 export interface BandTriangle {
   /** Three world-space vertices in CCW order (em coords). */
   readonly vertices: readonly [V2d, V2d, V2d];
+  /**
+   * LOCAL curve indices (into the same `curves` array passed to
+   * `buildGlyphBand`) of the candidate curves/lines this band
+   * triangle should test SDF distance against, padded with -1 to
+   * length 4. Empty list (= all -1) means the triangle has no
+   * inner-side vertex (rare; sliver entirely on the inflated side)
+   * — the FS should fall back to a wider search if this happens.
+   *
+   * Derived from the inner-polyline vertices the triangle touches:
+   * each anchor-point vertex contributes its two adjacent contour
+   * edges' curve indices; each leg-control-point vertex contributes
+   * the one edge that owns it. Worst case is 2 inner-anchor
+   * vertices × 2 curves each − 1 shared edge = 3 distinct curves
+   * per band triangle. K=4 has slack for triangles where libtess
+   * picks unusual vertex combinations.
+   */
+  readonly candidates: readonly [number, number, number, number];
 }
 
 /** Subdivide-or-not threshold (chord deviation as fraction of haloEm). */
@@ -153,10 +171,24 @@ export function buildGlyphBand(
   // This matches what the mesh tessellator uses to decide ADD vs
   // SUBTRACT on the curve's lens — orientation-independent.
   const chordPolys: V2d[][] = outlineContours.map((c) => c.map((e) => e.start));
+  // For each inner-polyline vertex, the LOCAL curve indices it
+  // associates with (anchor = 2; leg p1 = 1). Keyed by stringified
+  // exact em-coords — libtess copies V2d as `{x, y}` so object
+  // identity is lost, but the float values are preserved exactly.
+  // Outer (Clipper-quantized) vertices have different coord values
+  // so they don't collide with this map.
+  const innerVertCurves = new Map<string, number[]>();
+  const addVertCurve = (p: V2d, ci: number) => {
+    const key = `${p.x},${p.y}`;
+    let arr = innerVertCurves.get(key);
+    if (arr === undefined) { arr = []; innerVertCurves.set(key, arr); }
+    if (!arr.includes(ci)) arr.push(ci);
+  };
   const innerExact: V2d[][] = [];
   const innerSubj: ClipperPaths = [];
   for (const contour of outlineContours) {
-    const inner = buildInsideBodyPolyline(contour, curves, chordPolys);
+    const raw = buildInsideBodyPolyline(contour, curves, chordPolys, addVertCurve);
+    const inner = removeCollinearVertices(raw, innerVertCurves);
     if (inner.length < 3) continue;
     innerExact.push(inner);
     innerSubj.push(vec2dPathToClipper(inner, SCALE));
@@ -209,9 +241,74 @@ export function buildGlyphBand(
   }
   if (polylines.length === 0) return [];
   const tris = tessellateContoursLibtess(polylines, "even-odd");
-  return tris.map((t) => ({
-    vertices: [t.vertices[0]!, t.vertices[1]!, t.vertices[2]!] as const,
-  }));
+
+  // Pass 1: per-triangle vertex-tag lookup. Anchor / leg-control
+  // vertices on the inner polyline carry 1-2 contour-curve indices
+  // each; outer (Clipper-quantized) vertices contribute nothing.
+  // Triangles with all 3 vertices on the inflated outer end up with
+  // an empty list and need pass 2.
+  const triCands: number[][] = tris.map((t) => {
+    const cands: number[] = [];
+    for (const v of t.vertices) {
+      const arr = innerVertCurves.get(`${v.x},${v.y}`);
+      if (arr === undefined) continue;
+      for (const ci of arr) {
+        if (!cands.includes(ci)) cands.push(ci);
+      }
+    }
+    return cands;
+  });
+
+  // Pass 2: propagate candidates from vertex-sharing neighbors to
+  // any triangle whose pass-1 list is empty (libtess fan-tris with
+  // only outer vertices, common at thin stems with a wide halo).
+  // Build a vertex-key → triangle-index map, then for each empty-
+  // candidate triangle gather all neighbor candidates and pick the
+  // 4 closest to this triangle by real geometric distance.
+  const vertToTris = new Map<string, number[]>();
+  for (let ti = 0; ti < tris.length; ti++) {
+    const t = tris[ti]!;
+    for (const v of t.vertices) {
+      const key = `${v.x},${v.y}`;
+      let arr = vertToTris.get(key);
+      if (arr === undefined) { arr = []; vertToTris.set(key, arr); }
+      arr.push(ti);
+    }
+  }
+  for (let ti = 0; ti < tris.length; ti++) {
+    if (triCands[ti]!.length > 0) continue;
+    const t = tris[ti]!;
+    const tri3 = [t.vertices[0]!, t.vertices[1]!, t.vertices[2]!] as const;
+    const seen = new Set<number>();
+    for (const v of t.vertices) {
+      const ns = vertToTris.get(`${v.x},${v.y}`);
+      if (ns === undefined) continue;
+      for (const nti of ns) {
+        if (nti === ti) continue;
+        for (const ci of triCands[nti]!) seen.add(ci);
+      }
+    }
+    if (seen.size === 0) continue;
+    const ranked: { ci: number; d2: number }[] = [];
+    for (const ci of seen) {
+      ranked.push({ ci, d2: triToCurveDistSq(tri3, curves[ci]!) });
+    }
+    ranked.sort((a, b) => a.d2 - b.d2);
+    triCands[ti] = ranked.slice(0, 4).map((r) => r.ci);
+  }
+
+  return tris.map((t, ti) => {
+    const cands = triCands[ti]!;
+    return {
+      vertices: [t.vertices[0]!, t.vertices[1]!, t.vertices[2]!] as const,
+      candidates: [
+        cands[0] ?? -1,
+        cands[1] ?? -1,
+        cands[2] ?? -1,
+        cands[3] ?? -1,
+      ] as const as readonly [number, number, number, number],
+    };
+  });
 }
 
 /**
@@ -238,19 +335,34 @@ export function buildGlyphBand(
 function buildInsideBodyPolyline(
   contour: ReadonlyArray<OutlineEdge>,
   curves: ReadonlyArray<CurveTriangle>,
-  allChordPolys: ReadonlyArray<ReadonlyArray<V2d>>,
+  _allChordPolys: ReadonlyArray<ReadonlyArray<V2d>>,
+  tagVertex: (p: V2d, curveIndex: number) => void,
 ): V2d[] {
   const out: V2d[] = [];
-  for (const edge of contour) {
+  const N = contour.length;
+  for (let i = 0; i < N; i++) {
+    const edge = contour[i]!;
+    const prevEdge = contour[(i - 1 + N) % N]!;
     out.push(edge.start);
+    if (edge.curveIndex >= 0) tagVertex(edge.start, edge.curveIndex);
+    if (prevEdge.curveIndex >= 0) tagVertex(edge.start, prevEdge.curveIndex);
     if (edge.curveIndex < 0) continue;
     const c = curves[edge.curveIndex]!;
     if (c.kind !== "bezier2") continue;
     const v0 = c.vertices[0]!;
     const v1 = c.vertices[1]!;
-    if (v0.x === v1.x && v0.y === v1.y) continue; // line sentinel
-    if (pointInsideBody(v1, allChordPolys)) {
+    if (v0.x === v1.x && v0.y === v1.y) continue;
+    // Use the body tessellator's already-resolved decision on whether
+    // this curve's lens is added (m=+1, outward bulge) or subtracted
+    // (m=-1, inward bulge). pointInsidePolygon on the chord polygon
+    // is ambiguous when p1 sits exactly on a polygon-edge line — see
+    // j's e12 control point landing at the stem's left x. The body
+    // tessellator's `m` is the canonical answer for the same query.
+    const m = c.texcoords[0]![2]!;
+    if (m < 0) {
+      // Inward bulge: legs through the interior to p1.
       out.push(v1);
+      tagVertex(v1, edge.curveIndex);
     }
   }
   return out;
@@ -274,6 +386,60 @@ function pointInsideBody(
     if (pointInsidePolygon(p, poly)) inside = !inside;
   }
   return inside;
+}
+
+/**
+ * Remove vertices that lie on the line through their two polyline
+ * neighbours. Such vertices are geometrically redundant (the boundary
+ * doesn't bend there) and force libtess into degenerate triangles
+ * along chains of collinear inner-polyline points — exactly what
+ * happens when e.g. a leg p1 lands on the same line as the closing
+ * stem edge in `j`. Iterate until stable since removing one vertex
+ * may expose a new collinear triple.
+ *
+ * When a vertex is removed, MIGRATE its candidate tags onto its
+ * surviving neighbours — otherwise tags pinned only to the removed
+ * vertex (e.g. j's e13 line curve, which was tagged exclusively on
+ * e13.start) become orphaned and the band triangles along the
+ * collapsed edge lose those candidates.
+ */
+function removeCollinearVertices(
+  poly: V2d[],
+  vertCurves: Map<string, number[]>,
+): V2d[] {
+  const eps = 1e-12;
+  let cur = poly;
+  while (cur.length >= 3) {
+    const next: V2d[] = [];
+    const n = cur.length;
+    let removed = false;
+    for (let i = 0; i < n; i++) {
+      const a = cur[(i - 1 + n) % n]!;
+      const b = cur[i]!;
+      const c = cur[(i + 1) % n]!;
+      const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+      if (Math.abs(cross) < eps) {
+        // Migrate b's tags to both surviving neighbours so the
+        // collapsed edge keeps its candidate-curve associations.
+        const bKey = `${b.x},${b.y}`;
+        const bTags = vertCurves.get(bKey);
+        if (bTags !== undefined && bTags.length > 0) {
+          for (const nv of [a, c]) {
+            const nKey = `${nv.x},${nv.y}`;
+            let arr = vertCurves.get(nKey);
+            if (arr === undefined) { arr = []; vertCurves.set(nKey, arr); }
+            for (const ci of bTags) if (!arr.includes(ci)) arr.push(ci);
+          }
+        }
+        removed = true;
+        continue;
+      }
+      next.push(b);
+    }
+    if (!removed) return cur;
+    cur = next;
+  }
+  return cur;
 }
 
 function vec2dPathToClipper(pts: ReadonlyArray<V2d>, scale: number): ClipperPath {
@@ -987,8 +1153,8 @@ function _emitContourBand_unused(
     const Ai = jA.bevel ? jA.nextInner : jA.mInner;
     const Bo = jB.bevel ? jB.prevOuter : jB.mOuter;
     const Bi = jB.bevel ? jB.prevInner : jB.mInner;
-    out.push({ vertices: tri(Ai, Bi, Bo) });
-    out.push({ vertices: tri(Ai, Bo, Ao) });
+    out.push({ vertices: tri(Ai, Bi, Bo), candidates: [-1, -1, -1, -1] as const });
+    out.push({ vertices: tri(Ai, Bo, Ao), candidates: [-1, -1, -1, -1] as const });
   }
 
   // Bevel triangles at sharp joins: bridge prev's perpendicular
@@ -997,7 +1163,7 @@ function _emitContourBand_unused(
   for (let i = 0; i < N; i++) {
     const j = J[i]!;
     if (!j.bevel) continue;
-    out.push({ vertices: tri(j.v, j.prevOuter, j.nextOuter) });
-    out.push({ vertices: tri(j.v, j.nextInner, j.prevInner) });
+    out.push({ vertices: tri(j.v, j.prevOuter, j.nextOuter), candidates: [-1, -1, -1, -1] as const });
+    out.push({ vertices: tri(j.v, j.nextInner, j.prevInner), candidates: [-1, -1, -1, -1] as const });
   }
 }

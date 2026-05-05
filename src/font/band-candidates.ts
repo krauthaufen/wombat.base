@@ -110,7 +110,7 @@ function bezier2At(p0: V2d, p1: V2d, p2: V2d, t: number): V2d {
   );
 }
 
-function triToCurveDistSq(tri: Tri3, c: CurveTriangle): number {
+export function triToCurveDistSq(tri: Tri3, c: CurveTriangle): number {
   const v0 = c.vertices[0]!;
   const v1 = c.vertices[1]!;
   const v2 = c.vertices[2]!;
