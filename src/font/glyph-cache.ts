@@ -42,7 +42,7 @@ import type { Font } from "./font.js";
  *  the typical zoom range (≈ 15 px at 100 px-per-em rendering). At
  *  much higher zoom the band may visibly clip the AA ramp; rebuild
  *  the cache with a larger value if so. */
-const BAND_HALO_EM = 0.4;
+const BAND_HALO_EM = 0.05;
 
 /** Number of f32 lanes per vertex in the cache's atlas — matches
  *  `compileTessellation`'s interleaved layout: x, y, k, l, m, kind. */
@@ -118,6 +118,12 @@ export class GlyphCache {
   /** Running triangle count across cached glyphs, used to assign
    *  `triFirst` per glyph for the packed triangle buffer. */
   private triRunning = 0;
+  /** Running per-band-triangle ID, cache-global. Stuffed into
+   *  vertex slot[10] so the SDF debug shader can colour each band
+   *  triangle independently — surrogate for an unsupported
+   *  `gl_PrimitiveID` / `@builtin(primitive_index)` in the fragment
+   *  stage. */
+  private bandTriIdNext = 0;
 
   constructor(readonly font: Font) {}
 
@@ -365,18 +371,28 @@ export class GlyphCache {
     const ssboCurveBase = triFirst + flatTriCount;
     let nextVi = bufs.vertices.length / GLYPH_FLOATS_PER_VERTEX;
     for (const bt of bandTris) {
+      // Real per-tri candidate SSBO indices (band-builder's pass-1+2).
+      // -1 = unused. The FS counts non-(-1) entries to derive a
+      // candidate-count for the debug-mode colour ramp, so no
+      // separate vertex slot is needed for the visualisation.
       const c0 = bt.candidates[0] >= 0 ? ssboCurveBase + bt.candidates[0] : -1;
       const c1 = bt.candidates[1] >= 0 ? ssboCurveBase + bt.candidates[1] : -1;
       const c2 = bt.candidates[2] >= 0 ? ssboCurveBase + bt.candidates[2] : -1;
       const c3 = bt.candidates[3] >= 0 ? ssboCurveBase + bt.candidates[3] : -1;
+      const c4 = bt.candidates[4] >= 0 ? ssboCurveBase + bt.candidates[4] : -1;
+      const c5 = bt.candidates[5] >= 0 ? ssboCurveBase + bt.candidates[5] : -1;
+      // Running per-band-triangle ID (cache-global). Stuffed into
+      // klm.x — unused for kind=4 (no Loop-Blinn lens for band tris).
+      // Same value on all 3 verts → flat across the tri.
+      const triId = this.bandTriIdNext++;
       for (let k = 0; k < 3; k++) {
         const p = bt.vertices[k]!;
         this.vertices.push(
           p.x, p.y,
-          0, 0, 0,                 // klm unused for kind=4
+          triId, 0, 0,             // slot[2]=triId (klm.x), [3..4]=0
           VERTEX_KIND_BAND,
-          c0, c1, c2, c3,          // up to 4 candidate SSBO indices
-          0, 0,                    // slots [10..11] reserved
+          c0, c1, c2, c3,          // slots[6..9] = first 4 candidates
+          c4, c5,                  // slots[10..11] = candidates 5/6
         );
         this.sdfIndicesArr.push(nextVi);
         nextVi++;

@@ -74,7 +74,7 @@ export interface BandTriangle {
    * per band triangle. K=4 has slack for triangles where libtess
    * picks unusual vertex combinations.
    */
-  readonly candidates: readonly [number, number, number, number];
+  readonly candidates: readonly [number, number, number, number, number, number];
 }
 
 /** Subdivide-or-not threshold (chord deviation as fraction of haloEm). */
@@ -242,6 +242,71 @@ export function buildGlyphBand(
   if (polylines.length === 0) return [];
   const tris = tessellateContoursLibtess(polylines, "even-odd");
 
+  // Edge-flip post-process: every band tri should share at least one
+  // vertex with the body (= the inner polyline). libtess EVEN-ODD
+  // sometimes hands us "orphan" tris with all 3 vertices on the
+  // Clipper-inflated outer ring. Flipping a shared edge with an
+  // adjacent neighbour that DOES have an inner vertex moves both new
+  // tris onto the inner ring, eliminating the orphan.
+  const isInnerVert = (v: V2d): boolean =>
+    innerVertCurves.has(`${v.x},${v.y}`);
+  const triHasInner = (t: { vertices: readonly [V2d, V2d, V2d] }): boolean =>
+    isInnerVert(t.vertices[0]) || isInnerVert(t.vertices[1]) || isInnerVert(t.vertices[2]);
+  const edgeKey = (a: V2d, b: V2d): string => {
+    const ka = `${a.x},${a.y}`;
+    const kb = `${b.x},${b.y}`;
+    return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+  };
+  const buildEdgeMap = () => {
+    const m = new Map<string, number[]>();
+    for (let ti = 0; ti < tris.length; ti++) {
+      const v = tris[ti]!.vertices;
+      for (let k = 0; k < 3; k++) {
+        const key = edgeKey(v[k]!, v[(k + 1) % 3]!);
+        let arr = m.get(key);
+        if (arr === undefined) { arr = []; m.set(key, arr); }
+        arr.push(ti);
+      }
+    }
+    return m;
+  };
+  // Two passes — a flip can create a new partner-touching adjacency
+  // that resolves an orphan we couldn't fix on the first pass.
+  for (let pass = 0; pass < 3; pass++) {
+    let flipped = false;
+    const edgeMap = buildEdgeMap();
+    for (let ti = 0; ti < tris.length; ti++) {
+      if (triHasInner(tris[ti]!)) continue;
+      const v = tris[ti]!.vertices;
+      let didFlip = false;
+      for (let k = 0; k < 3 && !didFlip; k++) {
+        const a = v[k]!;
+        const b = v[(k + 1) % 3]!;
+        const r = v[(k + 2) % 3]!;     // ti's third vertex
+        const others = edgeMap.get(edgeKey(a, b))?.filter((x) => x !== ti) ?? [];
+        for (const nti of others) {
+          const nv = tris[nti]!.vertices;
+          // Find the neighbour's third vertex (the one not on edge a-b).
+          let s: V2d | undefined;
+          for (const x of nv) {
+            const kx = `${x.x},${x.y}`;
+            if (kx !== `${a.x},${a.y}` && kx !== `${b.x},${b.y}`) { s = x; break; }
+          }
+          if (s === undefined) continue;
+          if (!isInnerVert(s)) continue;
+          // Flip — both new tris contain s (inner). Winding ignored
+          // (CullMode "none" downstream); the geometry is symmetric.
+          tris[ti]  = { vertices: [a, r, s] as readonly [V2d, V2d, V2d] };
+          tris[nti] = { vertices: [b, s, r] as readonly [V2d, V2d, V2d] };
+          flipped = true;
+          didFlip = true;
+          break;
+        }
+      }
+    }
+    if (!flipped) break;
+  }
+
   // Pass 1: per-triangle vertex-tag lookup. Anchor / leg-control
   // vertices on the inner polyline carry 1-2 contour-curve indices
   // each; outer (Clipper-quantized) vertices contribute nothing.
@@ -275,17 +340,28 @@ export function buildGlyphBand(
       arr.push(ti);
     }
   }
+  // Snapshot pass-1 results — the top-up uses the ORIGINAL candidate
+  // lists from neighbours so we don't bootstrap candidates picked up
+  // in this same pass into yet more neighbours (would converge to
+  // every tri having every glyph curve, defeating the per-tri prune).
+  const pass1 = triCands.map((arr) => [...arr]);
   for (let ti = 0; ti < tris.length; ti++) {
-    if (triCands[ti]!.length > 0) continue;
+    const have = triCands[ti]!;
+    if (have.length >= 6) continue;
     const t = tris[ti]!;
     const tri3 = [t.vertices[0]!, t.vertices[1]!, t.vertices[2]!] as const;
+    // Existing candidates have distance 0 — keep them and only
+    // top up from neighbours up to a total of 4.
+    const ownSet = new Set<number>(have);
     const seen = new Set<number>();
     for (const v of t.vertices) {
       const ns = vertToTris.get(`${v.x},${v.y}`);
       if (ns === undefined) continue;
       for (const nti of ns) {
         if (nti === ti) continue;
-        for (const ci of triCands[nti]!) seen.add(ci);
+        for (const ci of pass1[nti]!) {
+          if (!ownSet.has(ci)) seen.add(ci);
+        }
       }
     }
     if (seen.size === 0) continue;
@@ -294,7 +370,8 @@ export function buildGlyphBand(
       ranked.push({ ci, d2: triToCurveDistSq(tri3, curves[ci]!) });
     }
     ranked.sort((a, b) => a.d2 - b.d2);
-    triCands[ti] = ranked.slice(0, 4).map((r) => r.ci);
+    const need = 6 - have.length;
+    triCands[ti] = [...have, ...ranked.slice(0, need).map((r) => r.ci)];
   }
 
   return tris.map((t, ti) => {
@@ -306,7 +383,9 @@ export function buildGlyphBand(
         cands[1] ?? -1,
         cands[2] ?? -1,
         cands[3] ?? -1,
-      ] as const as readonly [number, number, number, number],
+        cands[4] ?? -1,
+        cands[5] ?? -1,
+      ] as const as readonly [number, number, number, number, number, number],
     };
   });
 }
@@ -1153,8 +1232,8 @@ function _emitContourBand_unused(
     const Ai = jA.bevel ? jA.nextInner : jA.mInner;
     const Bo = jB.bevel ? jB.prevOuter : jB.mOuter;
     const Bi = jB.bevel ? jB.prevInner : jB.mInner;
-    out.push({ vertices: tri(Ai, Bi, Bo), candidates: [-1, -1, -1, -1] as const });
-    out.push({ vertices: tri(Ai, Bo, Ao), candidates: [-1, -1, -1, -1] as const });
+    out.push({ vertices: tri(Ai, Bi, Bo), candidates: [-1, -1, -1, -1, -1, -1] as const });
+    out.push({ vertices: tri(Ai, Bo, Ao), candidates: [-1, -1, -1, -1, -1, -1] as const });
   }
 
   // Bevel triangles at sharp joins: bridge prev's perpendicular
@@ -1163,7 +1242,7 @@ function _emitContourBand_unused(
   for (let i = 0; i < N; i++) {
     const j = J[i]!;
     if (!j.bevel) continue;
-    out.push({ vertices: tri(j.v, j.prevOuter, j.nextOuter), candidates: [-1, -1, -1, -1] as const });
-    out.push({ vertices: tri(j.v, j.nextInner, j.prevInner), candidates: [-1, -1, -1, -1] as const });
+    out.push({ vertices: tri(j.v, j.prevOuter, j.nextOuter), candidates: [-1, -1, -1, -1, -1, -1] as const });
+    out.push({ vertices: tri(j.v, j.nextInner, j.prevInner), candidates: [-1, -1, -1, -1, -1, -1] as const });
   }
 }
