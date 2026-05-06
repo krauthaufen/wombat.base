@@ -167,6 +167,14 @@ export class M33f {
     );
   }
 
+  // Direct row/column accessors — see m22f.ts.
+  get R0(): V3f { return this.row(0); }
+  get R1(): V3f { return this.row(1); }
+  get R2(): V3f { return this.row(2); }
+  get C0(): V3f { return this.col(0); }
+  get C1(): V3f { return this.col(1); }
+  get C2(): V3f { return this.col(2); }
+
   add(other: M33f): M33f {
     const m = new M33f();
     for (let i = 0; i < COMPONENT_COUNT; i++) m._data[i] = this._data[i]! + other._data[i]!;

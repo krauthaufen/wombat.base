@@ -18,6 +18,10 @@ export { V4f, V4fOf } from "./vector/v4f.js";
 export { V2d } from "./vector/v2d.js";
 export { V3d } from "./vector/v3d.js";
 export { V4d } from "./vector/v4d.js";
+// Side-effect import: installs swizzle accessors (`.xy`, `.xyz`,
+// `.zyx`, …) on every V*f prototype once all three classes have
+// finished initialising.
+import "./vector/install-swizzles.js";
 
 // Square matrices
 export { M22f } from "./matrix/m22f.js";

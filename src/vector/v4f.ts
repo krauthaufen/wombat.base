@@ -7,6 +7,7 @@ import { combineHash, hashNumber } from "../internal/hash.js";
 import { V2f } from "./v2f.js";
 import { V3f } from "./v3f.js";
 import { V4b } from "./v4b.js";
+import type { Sw4x2, Sw4x3, Sw4x4 } from "./swizzle.js";
 
 const F32_BYTES = 4;
 const COMPONENT_COUNT = 4;
@@ -68,6 +69,24 @@ export class V4f {
   static readonly unitY: V4f = new V4f(0, 1, 0, 0);
   static readonly unitZ: V4f = new V4f(0, 0, 1, 0);
   static readonly unitW: V4f = new V4f(0, 0, 0, 1);
+
+  // I/O constants — see comment in v2f.ts. 16 combinations.
+  static readonly OOOO: V4f = new V4f(0, 0, 0, 0);
+  static readonly OOOI: V4f = new V4f(0, 0, 0, 1);
+  static readonly OOIO: V4f = new V4f(0, 0, 1, 0);
+  static readonly OOII: V4f = new V4f(0, 0, 1, 1);
+  static readonly OIOO: V4f = new V4f(0, 1, 0, 0);
+  static readonly OIOI: V4f = new V4f(0, 1, 0, 1);
+  static readonly OIIO: V4f = new V4f(0, 1, 1, 0);
+  static readonly OIII: V4f = new V4f(0, 1, 1, 1);
+  static readonly IOOO: V4f = new V4f(1, 0, 0, 0);
+  static readonly IOOI: V4f = new V4f(1, 0, 0, 1);
+  static readonly IOIO: V4f = new V4f(1, 0, 1, 0);
+  static readonly IOII: V4f = new V4f(1, 0, 1, 1);
+  static readonly IIOO: V4f = new V4f(1, 1, 0, 0);
+  static readonly IIOI: V4f = new V4f(1, 1, 0, 1);
+  static readonly IIIO: V4f = new V4f(1, 1, 1, 0);
+  static readonly IIII: V4f = new V4f(1, 1, 1, 1);
 
   static splat(s: number): V4f { return new V4f(s, s, s, s); }
 
@@ -479,3 +498,10 @@ export class V4f {
 export function V4fOf(x: number, y: number, z: number, w: number): V4f {
   return new V4f(x, y, z, w);
 }
+
+// Swizzle accessors — runtime install lives in `./install-swizzles.ts`.
+type _V4fSwizzle2 = { readonly [K in Sw4x2]: V2f };
+type _V4fSwizzle3 = { readonly [K in Sw4x3]: V3f };
+type _V4fSwizzle4 = { readonly [K in Sw4x4]: V4f };
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface V4f extends _V4fSwizzle2, _V4fSwizzle3, _V4fSwizzle4 {}

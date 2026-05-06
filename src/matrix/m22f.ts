@@ -99,6 +99,16 @@ export class M22f {
     return new V2f(this._data[0 * COLS + c]!, this._data[1 * COLS + c]!);
   }
 
+  // Direct row/column accessors. `R0` / `C0` etc. are recognised by
+  // the wombat.shader frontend and lower to `MatrixRow`/`MatrixCol`
+  // IR. WGSL/GLSL emit accounts for the row-major-on-GPU upload
+  // convention so a CPU `m.R0` and a shader `m.R0` resolve to the
+  // same numerical row in both worlds.
+  get R0(): V2f { return this.row(0); }
+  get R1(): V2f { return this.row(1); }
+  get C0(): V2f { return this.col(0); }
+  get C1(): V2f { return this.col(1); }
+
   add(other: M22f): M22f {
     const m = new M22f();
     for (let i = 0; i < COMPONENT_COUNT; i++) m._data[i] = this._data[i]! + other._data[i]!;

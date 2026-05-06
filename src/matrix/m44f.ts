@@ -248,6 +248,16 @@ export class M44f {
     );
   }
 
+  // Direct row/column accessors — see m22f.ts.
+  get R0(): V4f { return this.row(0); }
+  get R1(): V4f { return this.row(1); }
+  get R2(): V4f { return this.row(2); }
+  get R3(): V4f { return this.row(3); }
+  get C0(): V4f { return this.col(0); }
+  get C1(): V4f { return this.col(1); }
+  get C2(): V4f { return this.col(2); }
+  get C3(): V4f { return this.col(3); }
+
   // ---------- additive group ----------
 
   add(other: M44f): M44f {

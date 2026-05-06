@@ -15,6 +15,7 @@
 import { combineHash, hashNumber } from "../internal/hash.js";
 import { V2f } from "./v2f.js";
 import { V3b } from "./v3b.js";
+import type { Sw3x2, Sw3x3 } from "./swizzle.js";
 
 const F32_BYTES = 4;
 const COMPONENT_COUNT = 3;
@@ -78,6 +79,16 @@ export class V3f {
   static readonly unitX: V3f = new V3f(1, 0, 0);
   static readonly unitY: V3f = new V3f(0, 1, 0);
   static readonly unitZ: V3f = new V3f(0, 0, 1);
+
+  // I/O constants — see comment in v2f.ts. 8 combinations.
+  static readonly OOO: V3f = new V3f(0, 0, 0);
+  static readonly OOI: V3f = new V3f(0, 0, 1);
+  static readonly OIO: V3f = new V3f(0, 1, 0);
+  static readonly OII: V3f = new V3f(0, 1, 1);
+  static readonly IOO: V3f = new V3f(1, 0, 0);
+  static readonly IOI: V3f = new V3f(1, 0, 1);
+  static readonly IIO: V3f = new V3f(1, 1, 0);
+  static readonly III: V3f = new V3f(1, 1, 1);
 
   /** Same value in all components. */
   static splat(s: number): V3f {
@@ -507,3 +518,19 @@ export class V3f {
 export function V3fOf(x: number, y: number, z: number): V3f {
   return new V3f(x, y, z);
 }
+
+// Swizzle accessors (`.xy`, `.xyz`, `.zyx`, `.rgb`, …). Installed
+// at module load on the prototype; the `interface V3f` merge below
+// gives callers proper return types per swizzle length. Single-
+// component access (`.x`, `.y`, `.z` → number) is already handled
+// by the class's own get/set definitions and isn't touched here.
+//
+// The full-permutation type list is generated from the `Letter3`
+// alphabet (xyz / rgb / stp). Cross-family combos like `.xrz` are
+// allowed at the type level because TypeScript template literals
+// don't restrict to a single family — runtime resolves them via
+// the same alias index, so `v.xrz === v.xxz`.
+type _V3fSwizzle2 = { readonly [K in Sw3x2]: V2f };
+type _V3fSwizzle3 = { readonly [K in Sw3x3]: V3f };
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface V3f extends _V3fSwizzle2, _V3fSwizzle3 {}

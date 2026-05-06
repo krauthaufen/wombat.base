@@ -5,6 +5,7 @@
 
 import { combineHash, hashNumber } from "../internal/hash.js";
 import { V2b } from "./v2b.js";
+import type { Sw2x2 } from "./swizzle.js";
 
 const F32_BYTES = 4;
 const COMPONENT_COUNT = 2;
@@ -38,6 +39,15 @@ export class V2f {
   static readonly one: V2f = new V2f(1, 1);
   static readonly unitX: V2f = new V2f(1, 0);
   static readonly unitY: V2f = new V2f(0, 1);
+
+  // I/O constants — every (1, 0) bit-pattern as a V2f. `I` = 1,
+  // `O` = 0. Mirrors Aardvark's `V2f.IO` / `V2f.OI` etc. — read
+  // as constant masks for axis swizzles (`p.xy * V2f.IO` keeps x,
+  // zeros y) and as readable basis vectors.
+  static readonly OO: V2f = new V2f(0, 0);
+  static readonly OI: V2f = new V2f(0, 1);
+  static readonly IO: V2f = new V2f(1, 0);
+  static readonly II: V2f = new V2f(1, 1);
 
   static splat(s: number): V2f { return new V2f(s, s); }
 
@@ -302,3 +312,11 @@ export class V2f {
 export function V2fOf(x: number, y: number): V2f {
   return new V2f(x, y);
 }
+
+// Swizzle accessors — runtime install lives in `./install-swizzles.ts`
+// (called once after V2/V3/V4 are all defined to break a cycle).
+// Type-level shape merges in here so consumers see proper return
+// types per swizzle length.
+type _V2fSwizzle2 = { readonly [K in Sw2x2]: V2f };
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface V2f extends _V2fSwizzle2 {}
