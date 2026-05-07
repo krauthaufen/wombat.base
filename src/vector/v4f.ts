@@ -8,6 +8,7 @@ import { V2f } from "./v2f.js";
 import { V3f } from "./v3f.js";
 import { V4b } from "./v4b.js";
 import type { Sw4x2, Sw4x3, Sw4x4 } from "./swizzle.js";
+import type { M44f } from "../matrix/m44f.js";
 
 const F32_BYTES = 4;
 const COMPONENT_COUNT = 4;
@@ -135,11 +136,25 @@ export class V4f {
 
   // ---------- vector space ----------
 
-  mul(other: V4f | number): V4f {
+  mul(other: V4f | number): V4f;
+  mul(m: M44f): V4f;
+  mul(other: V4f | number | M44f): V4f {
     if (typeof other === "number") {
       return new V4f(
         this._data[0]! * other, this._data[1]! * other,
         this._data[2]! * other, this._data[3]! * other,
+      );
+    }
+    // Row-vector × matrix: (v · M)[c] = Σ v[r] · M[r,c]. M44f is row-
+    // major (M[r,c] = m._data[r*4 + c]), V4f._data length is 4.
+    if (other._data.length === 16) {
+      const m = other._data;
+      const v0 = this._data[0]!, v1 = this._data[1]!, v2 = this._data[2]!, v3 = this._data[3]!;
+      return new V4f(
+        v0 * m[0]!  + v1 * m[4]!  + v2 * m[8]!   + v3 * m[12]!,
+        v0 * m[1]!  + v1 * m[5]!  + v2 * m[9]!   + v3 * m[13]!,
+        v0 * m[2]!  + v1 * m[6]!  + v2 * m[10]!  + v3 * m[14]!,
+        v0 * m[3]!  + v1 * m[7]!  + v2 * m[11]!  + v3 * m[15]!,
       );
     }
     return new V4f(
