@@ -5,6 +5,7 @@
 
 import { combineHash, hashNumber } from "../internal/hash.js";
 import { V4b } from "./v4b.js";
+import type { M44d } from "../matrix/m44d.js";
 
 const F64_BYTES = 8;
 const COMPONENT_COUNT = 4;
@@ -89,11 +90,23 @@ export class V4d {
 
   // ---------- vector space ----------
 
-  mul(other: V4d | number): V4d {
+  mul(other: V4d | number): V4d;
+  mul(m: M44d): V4d;
+  mul(other: V4d | number | M44d): V4d {
     if (typeof other === "number") {
       return new V4d(
         this._data[0]! * other, this._data[1]! * other,
         this._data[2]! * other, this._data[3]! * other,
+      );
+    }
+    if (other._data.length === 16) {
+      const m = other._data;
+      const v0 = this._data[0]!, v1 = this._data[1]!, v2 = this._data[2]!, v3 = this._data[3]!;
+      return new V4d(
+        v0 * m[0]!  + v1 * m[4]!  + v2 * m[8]!   + v3 * m[12]!,
+        v0 * m[1]!  + v1 * m[5]!  + v2 * m[9]!   + v3 * m[13]!,
+        v0 * m[2]!  + v1 * m[6]!  + v2 * m[10]!  + v3 * m[14]!,
+        v0 * m[3]!  + v1 * m[7]!  + v2 * m[11]!  + v3 * m[15]!,
       );
     }
     return new V4d(

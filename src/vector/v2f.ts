@@ -6,6 +6,7 @@
 import { combineHash, hashNumber } from "../internal/hash.js";
 import { V2b } from "./v2b.js";
 import type { Sw2x2 } from "./swizzle.js";
+import type { M22f } from "../matrix/m22f.js";
 
 const F32_BYTES = 4;
 const COMPONENT_COUNT = 2;
@@ -82,9 +83,18 @@ export class V2f {
 
   // ---------- vector space ----------
 
-  mul(other: V2f | number): V2f {
+  mul(other: V2f | number): V2f;
+  mul(m: M22f): V2f;
+  mul(other: V2f | number | M22f): V2f {
     if (typeof other === "number") {
       return new V2f(this._data[0]! * other, this._data[1]! * other);
+    }
+    // Row-vector × matrix: (v · M)[c] = Σ v[r] · M[r,c]. M22f is row-
+    // major (M[r,c] = m._data[r*2 + c]).
+    if (other._data.length === 4) {
+      const m = other._data;
+      const v0 = this._data[0]!, v1 = this._data[1]!;
+      return new V2f(v0 * m[0]! + v1 * m[2]!, v0 * m[1]! + v1 * m[3]!);
     }
     return new V2f(this._data[0]! * other._data[0]!, this._data[1]! * other._data[1]!);
   }

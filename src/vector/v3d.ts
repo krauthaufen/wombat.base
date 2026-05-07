@@ -14,6 +14,7 @@
 
 import { combineHash, hashNumber } from "../internal/hash.js";
 import { V3b } from "./v3b.js";
+import type { M33d } from "../matrix/m33d.js";
 
 const F64_BYTES = 8;
 const COMPONENT_COUNT = 3;
@@ -111,12 +112,23 @@ export class V3d {
   // ---------- vector space ----------
 
   /** Component-wise multiply by another vector OR scalar multiply. */
-  mul(other: V3d | number): V3d {
+  mul(other: V3d | number): V3d;
+  mul(m: M33d): V3d;
+  mul(other: V3d | number | M33d): V3d {
     if (typeof other === "number") {
       return new V3d(
         this._data[0]! * other,
         this._data[1]! * other,
         this._data[2]! * other,
+      );
+    }
+    if (other._data.length === 9) {
+      const m = other._data;
+      const v0 = this._data[0]!, v1 = this._data[1]!, v2 = this._data[2]!;
+      return new V3d(
+        v0 * m[0]! + v1 * m[3]! + v2 * m[6]!,
+        v0 * m[1]! + v1 * m[4]! + v2 * m[7]!,
+        v0 * m[2]! + v1 * m[5]! + v2 * m[8]!,
       );
     }
     return new V3d(

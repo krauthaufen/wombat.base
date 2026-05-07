@@ -5,6 +5,7 @@
 
 import { combineHash, hashNumber } from "../internal/hash.js";
 import { V2b } from "./v2b.js";
+import type { M22d } from "../matrix/m22d.js";
 
 const F64_BYTES = 8;
 const COMPONENT_COUNT = 2;
@@ -72,9 +73,16 @@ export class V2d {
 
   // ---------- vector space ----------
 
-  mul(other: V2d | number): V2d {
+  mul(other: V2d | number): V2d;
+  mul(m: M22d): V2d;
+  mul(other: V2d | number | M22d): V2d {
     if (typeof other === "number") {
       return new V2d(this._data[0]! * other, this._data[1]! * other);
+    }
+    if (other._data.length === 4) {
+      const m = other._data;
+      const v0 = this._data[0]!, v1 = this._data[1]!;
+      return new V2d(v0 * m[0]! + v1 * m[2]!, v0 * m[1]! + v1 * m[3]!);
     }
     return new V2d(this._data[0]! * other._data[0]!, this._data[1]! * other._data[1]!);
   }

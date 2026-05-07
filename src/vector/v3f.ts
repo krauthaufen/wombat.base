@@ -16,6 +16,7 @@ import { combineHash, hashNumber } from "../internal/hash.js";
 import { V2f } from "./v2f.js";
 import { V3b } from "./v3b.js";
 import type { Sw3x2, Sw3x3 } from "./swizzle.js";
+import type { M33f } from "../matrix/m33f.js";
 
 const F32_BYTES = 4;
 const COMPONENT_COUNT = 3;
@@ -139,12 +140,25 @@ export class V3f {
   // ---------- vector space ----------
 
   /** Component-wise multiply by another vector OR scalar multiply. */
-  mul(other: V3f | number): V3f {
+  mul(other: V3f | number): V3f;
+  mul(m: M33f): V3f;
+  mul(other: V3f | number | M33f): V3f {
     if (typeof other === "number") {
       return new V3f(
         this._data[0]! * other,
         this._data[1]! * other,
         this._data[2]! * other,
+      );
+    }
+    // Row-vector × matrix: (v · M)[c] = Σ v[r] · M[r,c]. M33f is row-
+    // major (M[r,c] = m._data[r*3 + c]).
+    if (other._data.length === 9) {
+      const m = other._data;
+      const v0 = this._data[0]!, v1 = this._data[1]!, v2 = this._data[2]!;
+      return new V3f(
+        v0 * m[0]! + v1 * m[3]! + v2 * m[6]!,
+        v0 * m[1]! + v1 * m[4]! + v2 * m[7]!,
+        v0 * m[2]! + v1 * m[5]! + v2 * m[8]!,
       );
     }
     return new V3f(
