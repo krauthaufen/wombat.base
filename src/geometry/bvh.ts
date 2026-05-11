@@ -8,6 +8,7 @@
 import { V3d } from "../vector/v3d.js";
 import { Box3d } from "../box/box3d.js";
 import { Ray3d } from "./ray3d.js";
+import { Plane3d } from "./plane3d.js";
 import type { IIntersectHit } from "./intersectable.js";
 import { rayBoxSlab } from "./intersectable.js";
 
@@ -348,6 +349,35 @@ function getIntersectingNode<K, V>(
   }
 }
 
+/**
+ * Box-vs-hull intersection. `planes`'s normals point INWARD: a box
+ * is outside the hull iff ANY plane's `classify(box) === "below"`.
+ * (Inside or straddling otherwise.) Standard frustum cull test.
+ */
+function boxIntersectsHull(box: Box3d, planes: ReadonlyArray<Plane3d>): boolean {
+  for (const p of planes) {
+    if (p.classify(box) === "below") return false;
+  }
+  return true;
+}
+
+function getIntersectingFrustumNode<K, V>(
+  planes: ReadonlyArray<Plane3d>, node: Node<K, V>, out: Array<BvhItem<K, V>>,
+  filter?: (key: K, box: Box3d, value: V) => boolean,
+): void {
+  if (!boxIntersectsHull(node.bounds, planes)) return;
+  if (node.kind === "leaf") {
+    for (const [k, e] of node.entries) {
+      if (!boxIntersectsHull(e.box, planes)) continue;
+      if (filter && !filter(k, e.box, e.value)) continue;
+      out.push({ key: k, box: e.box, value: e.value });
+    }
+  } else {
+    getIntersectingFrustumNode(planes, node.left, out, filter);
+    getIntersectingFrustumNode(planes, node.right, out, filter);
+  }
+}
+
 interface ClosestState<K, V> {
   bestT: number;
   bestHit: IIntersectHit | undefined;
@@ -496,6 +526,31 @@ export class Bvh<K, V> {
   ): Array<BvhItem<K, V>> {
     const out: Array<BvhItem<K, V>> = [];
     if (this.root) getIntersectingNode(query, this.root, out, filter);
+    return out;
+  }
+
+  /**
+   * Frustum-cull traversal. `planes` are the half-space inequalities
+   * defining the frustum (each plane's normal points INWARD); a box
+   * is inside the frustum iff `Plane3d.classify(box) !== "below"` for
+   * every plane. Standard convention for a perspective view frustum:
+   * left, right, bottom, top, near, far — six planes, all inward.
+   *
+   * Why this over `getIntersecting` with an AABB of the frustum
+   * corners: an unprojected pick-disc frustum sweeps a long thin
+   * cone from camera to far plane; its AABB is loose in every
+   * perpendicular axis and admits many objects that aren't actually
+   * inside the cone. The plane-set test is tight and prunes whole
+   * subtrees at every BVH level via `Plane3d.classify`.
+   */
+  getIntersectingFrustum(planes: ReadonlyArray<Plane3d>): Array<BvhItem<K, V>>;
+  getIntersectingFrustum(planes: ReadonlyArray<Plane3d>, filter: (key: K, box: Box3d, value: V) => boolean): Array<BvhItem<K, V>>;
+  getIntersectingFrustum(
+    planes: ReadonlyArray<Plane3d>,
+    filter?: (key: K, box: Box3d, value: V) => boolean,
+  ): Array<BvhItem<K, V>> {
+    const out: Array<BvhItem<K, V>> = [];
+    if (this.root) getIntersectingFrustumNode(planes, this.root, out, filter);
     return out;
   }
 
