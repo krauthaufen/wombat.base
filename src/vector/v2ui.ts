@@ -184,6 +184,18 @@ export class V2ui {
   toArray(): [number, number] {
     return [this._data[0]!, this._data[1]!];
   }
+  /** Write the backing components (flat) into `dst` starting at
+   *  `offset`, without allocating. A typed-array `dst` — e.g. a
+   *  packed-uniform `Float32Array` view — narrows the values on store. */
+  copyTo(dst: Float32Array | Float64Array | number[], offset = 0): void {
+    const d = this._data;
+    if (Array.isArray(dst)) {
+      for (let i = 0; i < d.length; i++) dst[offset + i] = d[i]!;
+    } else {
+      dst.set(d, offset);
+    }
+  }
+
 
   static addInto(a: V2ui, b: V2ui, target: V2ui): V2ui {
     target._data[0] = a._data[0]! + b._data[0]!;

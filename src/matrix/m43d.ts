@@ -179,6 +179,18 @@ export class M43d {
   toArray(): number[] {
     return Array.from(this._data);
   }
+  /** Write the backing components (flat) into `dst` starting at
+   *  `offset`, without allocating. A typed-array `dst` — e.g. a
+   *  packed-uniform `Float32Array` view — narrows the values on store. */
+  copyTo(dst: Float32Array | Float64Array | number[], offset = 0): void {
+    const d = this._data;
+    if (Array.isArray(dst)) {
+      for (let i = 0; i < d.length; i++) dst[offset + i] = d[i]!;
+    } else {
+      dst.set(d, offset);
+    }
+  }
+
 
   static addInto(a: M43d, b: M43d, target: M43d): M43d {
     for (let i = 0; i < COMPONENT_COUNT; i++) target._data[i] = a._data[i]! + b._data[i]!;
