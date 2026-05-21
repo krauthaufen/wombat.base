@@ -23,7 +23,9 @@
     "linear-algebra"
   ],
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/numberMethods.js"
+  ],
   "engines": {
     "node": ">=18"
   },

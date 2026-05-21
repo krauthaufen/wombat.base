@@ -1,5 +1,11 @@
 // Public barrel for `@aardworx/wombat.base`.
 
+// Side effect: install scalar operator-methods on Number.prototype
+// (mul/add/sub/div/neg) so method-style scalar math runs at runtime,
+// matching the V*/M* method APIs. Listed in package.json `sideEffects`
+// so bundlers don't tree-shake it away.
+import "./numberMethods.js";
+
 export * from "./scalar.js";
 
 // Vectors
