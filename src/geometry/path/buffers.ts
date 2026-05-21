@@ -1,15 +1,18 @@
 // Convert tessellation output to GPU-ready interleaved buffers.
 //
-// Per-vertex layout (12 f32 = 48 bytes, 3 vec4):
-//   - vec4_0:  pos.xy, klm.xy
-//   - vec4_1:  klm.z, kind, cand0, cand1
-//   - vec4_2:  cand2, cand3, cand4, cand5
+// Per-vertex layout (9 f32 = 36 bytes):
+//   - [0..1] pos.xy
+//   - [2..4] klm.xyz   (BAND verts reuse [2] for triId, [3..4]=0)
+//   - [5]    kind
+//   - [6..8] lensCand0..2   (lens kind 1/2: self + prev/next curve
+//            SSBO indices for the lens-outside AA; -1 otherwise)
 //
-// The first 6 floats `(pos.xy, klm.xyz, kind)` are the legacy
-// "fast-path" layout. kinds 0..3 are unchanged. kind = 4 (BAND)
-// carries up to 6 candidate curve-triangle SSBO indices for the
-// per-pixel SDF text path — the FS runs Newton against each cand_i
-// >= 0 and takes the min. Lines are synthesised as degenerate
+// BAND (kind = 4) candidates are NOT stored per-vertex anymore — they
+// live in a per-band-triangle CSR storage buffer keyed by `triId`
+// (slot [2]). The FS loops the triangle's candidate range and runs
+// Newton against each. This removes the per-vertex candidate cap and
+// shrinks the vertex from 64 B to 36 B. Lines are synthesised as
+// degenerate
 // quadratic curves so they have a real curveIndex too. For kinds
 // 0..3 every cand slot is -1.
 // Three triangle ranges are reported separately — `interiorRange`,
@@ -59,8 +62,18 @@ export const VERTEX_KIND_LINE_RIBBON  = 3;
  * the min, and ramps α 1→0 across `AaWidthPx`.
  */
 export const VERTEX_KIND_BAND = 4;
+/**
+ * Interior "shell" vertex — the INSIDE half of the symmetric AA ramp.
+ * Emitted by GlyphCache (not compileTessellation) for near-boundary
+ * interior triangles. Uses the same per-triangle CSR candidate
+ * mechanism as the band (triId parked in slot[2]); the FS applies the
+ * inside sign (+1): `α = clamp(0.5 + dist/aaW)`. Deep interior tris
+ * with no candidate curve within halo stay VERTEX_KIND_INTERIOR
+ * (flat α = 1).
+ */
+export const VERTEX_KIND_FILL_RAMP = 5;
 
-export const VERTEX_BYTE_SIZE = 48; // 12 × f32
+export const VERTEX_BYTE_SIZE = 36; // 9 × f32 (lens cand slots 6..8; band cands in CSR SSBO)
 
 export interface TessellationBuffers {
   /** Interleaved vertex data: per vertex, 12 f32 (3 vec4):
@@ -100,7 +113,7 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
   const totalTriCount = flatTriCount + curveTriCount + ribbonTriCount;
   const totalVertCount = totalTriCount * 3;
 
-  const FLOATS = 12;
+  const FLOATS = VERTEX_BYTE_SIZE / 4;
   const vertices = new Float32Array(totalVertCount * FLOATS);
   const indices = new Uint32Array(totalTriCount * 3);
   const curveBulgeOutward = new Uint8Array(curveTriCount);
@@ -109,14 +122,11 @@ export function compileTessellation(t: FaceTriangulation): TessellationBuffers {
   let ii = 0; // index pointer
   let nextIdx = 0; // next unused vertex index
 
-  // Helper: set every cand slot to -1 for non-band vertex kinds.
+  // Helper: set the lens-candidate slots (6..8) to -1. Lens (kind
+  // 1/2) overwrites slot 6 (and glyph-cache fills 7..8); other kinds
+  // leave them -1.
   const writeNoBand = (off: number): void => {
-    vertices[off + 6]  = -1;
-    vertices[off + 7]  = -1;
-    vertices[off + 8]  = -1;
-    vertices[off + 9]  = -1;
-    vertices[off + 10] = -1;
-    vertices[off + 11] = -1;
+    for (let c = 6; c < FLOATS; c++) vertices[off + c] = -1;
   };
 
   // ---- Interior triangles ----

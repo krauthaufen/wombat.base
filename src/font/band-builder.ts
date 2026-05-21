@@ -48,7 +48,7 @@ import type {
 import type { CurveTriangle } from "../geometry/path/loop-blinn.js";
 import { tessellateContoursLibtess } from "../geometry/path/libtess-fill.js";
 import { pointInsidePolygon } from "../geometry/path/triangulate.js";
-import { triToCurveDistSq } from "./band-candidates.js";
+import { curvesWithinDist } from "./band-candidates.js";
 import ClipperLib from "clipper-lib";
 
 interface ClipperPt { X: number; Y: number; }
@@ -61,20 +61,12 @@ export interface BandTriangle {
   /**
    * LOCAL curve indices (into the same `curves` array passed to
    * `buildGlyphBand`) of the candidate curves/lines this band
-   * triangle should test SDF distance against, padded with -1 to
-   * length 4. Empty list (= all -1) means the triangle has no
-   * inner-side vertex (rare; sliver entirely on the inflated side)
-   * — the FS should fall back to a wider search if this happens.
-   *
-   * Derived from the inner-polyline vertices the triangle touches:
-   * each anchor-point vertex contributes its two adjacent contour
-   * edges' curve indices; each leg-control-point vertex contributes
-   * the one edge that owns it. Worst case is 2 inner-anchor
-   * vertices × 2 curves each − 1 shared edge = 3 distinct curves
-   * per band triangle. K=4 has slack for triangles where libtess
-   * picks unusual vertex combinations.
+   * triangle should test SDF distance against. Variable length, no
+   * cap: the EXACT set of curves within the full halo radius of the
+   * triangle (exhaustive triangle-to-curve distance test). GlyphCache
+   * packs these into a per-triangle CSR range that the FS loops.
    */
-  readonly candidates: readonly [number, number, number, number, number, number];
+  readonly candidates: readonly number[];
 }
 
 /** Subdivide-or-not threshold (chord deviation as fraction of haloEm). */
@@ -270,6 +262,20 @@ export function buildGlyphBand(
     }
     return m;
   };
+  // Proper segment crossing test (strict): true iff p1-p2 and p3-p4
+  // intersect at an interior point of both. Used as the edge-flip
+  // convexity guard — a flip of shared edge (p1,p2) to diagonal
+  // (p3,p4) is legal only when the two segments cross (convex quad).
+  const segmentsCross = (p1: V2d, p2: V2d, p3: V2d, p4: V2d): boolean => {
+    const o = (a: V2d, b: V2d, c: V2d): number =>
+      (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    const d1 = o(p3, p4, p1);
+    const d2 = o(p3, p4, p2);
+    const d3 = o(p1, p2, p3);
+    const d4 = o(p1, p2, p4);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+           ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  };
   // Two passes — a flip can create a new partner-touching adjacency
   // that resolves an orphan we couldn't fix on the first pass.
   for (let pass = 0; pass < 3; pass++) {
@@ -294,6 +300,14 @@ export function buildGlyphBand(
           }
           if (s === undefined) continue;
           if (!isInnerVert(s)) continue;
+          // Convexity guard: the flip replaces shared edge a-b with the
+          // diagonal r-s. It is only valid when the quad a-r-b-s is
+          // convex — i.e. segment r-s actually crosses segment a-b.
+          // Across a CONCAVE quad the new diagonal lies outside the
+          // union and the two output triangles OVERLAP (double-blend in
+          // the band). Skip those flips; the orphan stays (rare) rather
+          // than corrupting the tessellation with overlapping tris.
+          if (!segmentsCross(a, b, r, s)) continue;
           // Flip — both new tris contain s (inner). Winding ignored
           // (CullMode "none" downstream); the geometry is symmetric.
           tris[ti]  = { vertices: [a, r, s] as readonly [V2d, V2d, V2d] };
@@ -307,85 +321,22 @@ export function buildGlyphBand(
     if (!flipped) break;
   }
 
-  // Pass 1: per-triangle vertex-tag lookup. Anchor / leg-control
-  // vertices on the inner polyline carry 1-2 contour-curve indices
-  // each; outer (Clipper-quantized) vertices contribute nothing.
-  // Triangles with all 3 vertices on the inflated outer end up with
-  // an empty list and need pass 2.
-  const triCands: number[][] = tris.map((t) => {
-    const cands: number[] = [];
-    for (const v of t.vertices) {
-      const arr = innerVertCurves.get(`${v.x},${v.y}`);
-      if (arr === undefined) continue;
-      for (const ci of arr) {
-        if (!cands.includes(ci)) cands.push(ci);
-      }
-    }
-    return cands;
-  });
-
-  // Pass 2: propagate candidates from vertex-sharing neighbors to
-  // any triangle whose pass-1 list is empty (libtess fan-tris with
-  // only outer vertices, common at thin stems with a wide halo).
-  // Build a vertex-key → triangle-index map, then for each empty-
-  // candidate triangle gather all neighbor candidates and pick the
-  // 4 closest to this triangle by real geometric distance.
-  const vertToTris = new Map<string, number[]>();
-  for (let ti = 0; ti < tris.length; ti++) {
-    const t = tris[ti]!;
-    for (const v of t.vertices) {
-      const key = `${v.x},${v.y}`;
-      let arr = vertToTris.get(key);
-      if (arr === undefined) { arr = []; vertToTris.set(key, arr); }
-      arr.push(ti);
-    }
-  }
-  // Snapshot pass-1 results — the top-up uses the ORIGINAL candidate
-  // lists from neighbours so we don't bootstrap candidates picked up
-  // in this same pass into yet more neighbours (would converge to
-  // every tri having every glyph curve, defeating the per-tri prune).
-  const pass1 = triCands.map((arr) => [...arr]);
-  for (let ti = 0; ti < tris.length; ti++) {
-    const have = triCands[ti]!;
-    if (have.length >= 6) continue;
-    const t = tris[ti]!;
+  // Candidate selection: exhaustive distance test. For each band
+  // triangle, every curve whose minimal triangle-to-curve distance is
+  // within the full halo radius is a candidate — this is the EXACT set
+  // of curves that can be closest to any fragment inside the triangle
+  // (a fragment is at most `halo` from the contour, so a curve farther
+  // than the triangle's reach can never win the min-distance). No
+  // count cap, no subdivision: the variable-length list goes straight
+  // into the per-band CSR SSBO. The 1.0625 fudge (1 + 1/16) absorbs
+  // the Clipper-quantization slack on the inflated outer boundary so a
+  // curve grazing the halo edge is never dropped.
+  const radius = haloEm * 1.0625;
+  return tris.map((t) => {
     const tri3 = [t.vertices[0]!, t.vertices[1]!, t.vertices[2]!] as const;
-    // Existing candidates have distance 0 — keep them and only
-    // top up from neighbours up to a total of 4.
-    const ownSet = new Set<number>(have);
-    const seen = new Set<number>();
-    for (const v of t.vertices) {
-      const ns = vertToTris.get(`${v.x},${v.y}`);
-      if (ns === undefined) continue;
-      for (const nti of ns) {
-        if (nti === ti) continue;
-        for (const ci of pass1[nti]!) {
-          if (!ownSet.has(ci)) seen.add(ci);
-        }
-      }
-    }
-    if (seen.size === 0) continue;
-    const ranked: { ci: number; d2: number }[] = [];
-    for (const ci of seen) {
-      ranked.push({ ci, d2: triToCurveDistSq(tri3, curves[ci]!) });
-    }
-    ranked.sort((a, b) => a.d2 - b.d2);
-    const need = 6 - have.length;
-    triCands[ti] = [...have, ...ranked.slice(0, need).map((r) => r.ci)];
-  }
-
-  return tris.map((t, ti) => {
-    const cands = triCands[ti]!;
     return {
-      vertices: [t.vertices[0]!, t.vertices[1]!, t.vertices[2]!] as const,
-      candidates: [
-        cands[0] ?? -1,
-        cands[1] ?? -1,
-        cands[2] ?? -1,
-        cands[3] ?? -1,
-        cands[4] ?? -1,
-        cands[5] ?? -1,
-      ] as const as readonly [number, number, number, number, number, number],
+      vertices: tri3,
+      candidates: curvesWithinDist(tri3, curves, radius),
     };
   });
 }
@@ -1238,8 +1189,8 @@ function _emitContourBand_unused(
     const Ai = jA.bevel ? jA.nextInner : jA.mInner;
     const Bo = jB.bevel ? jB.prevOuter : jB.mOuter;
     const Bi = jB.bevel ? jB.prevInner : jB.mInner;
-    out.push({ vertices: tri(Ai, Bi, Bo), candidates: [-1, -1, -1, -1, -1, -1] as const });
-    out.push({ vertices: tri(Ai, Bo, Ao), candidates: [-1, -1, -1, -1, -1, -1] as const });
+    out.push({ vertices: tri(Ai, Bi, Bo), candidates: [] });
+    out.push({ vertices: tri(Ai, Bo, Ao), candidates: [] });
   }
 
   // Bevel triangles at sharp joins: bridge prev's perpendicular
@@ -1248,7 +1199,7 @@ function _emitContourBand_unused(
   for (let i = 0; i < N; i++) {
     const j = J[i]!;
     if (!j.bevel) continue;
-    out.push({ vertices: tri(j.v, j.prevOuter, j.nextOuter), candidates: [-1, -1, -1, -1, -1, -1] as const });
-    out.push({ vertices: tri(j.v, j.nextInner, j.prevInner), candidates: [-1, -1, -1, -1, -1, -1] as const });
+    out.push({ vertices: tri(j.v, j.prevOuter, j.nextOuter), candidates: [] });
+    out.push({ vertices: tri(j.v, j.nextInner, j.prevInner), candidates: [] });
   }
 }

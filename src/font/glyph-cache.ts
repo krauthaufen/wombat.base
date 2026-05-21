@@ -28,11 +28,13 @@ import {
 } from "../geometry/path/triangulate-glyph.js";
 import {
   compileTessellation, VERTEX_BYTE_SIZE, VERTEX_KIND_BAND,
+  VERTEX_KIND_FILL_RAMP,
 } from "../geometry/path/buffers.js";
 import {
   buildGlyphSdf, packSdfSegments, SDF_FLOATS_PER_SEGMENT,
 } from "./glyph-sdf.js";
 import { buildGlyphBand } from "./band-builder.js";
+import { curvesWithinDist } from "./band-candidates.js";
 import type { Font } from "./font.js";
 
 /** Em-space half-width of the SDF outline band. The cache pre-bakes
@@ -42,7 +44,7 @@ import type { Font } from "./font.js";
  *  the typical zoom range (≈ 15 px at 100 px-per-em rendering). At
  *  much higher zoom the band may visibly clip the AA ramp; rebuild
  *  the cache with a larger value if so. */
-const BAND_HALO_EM = 0.1;
+const BAND_HALO_EM = 0.05;
 
 /** Number of f32 lanes per vertex in the cache's atlas — matches
  *  `compileTessellation`'s interleaved layout: x, y, k, l, m, kind. */
@@ -118,12 +120,19 @@ export class GlyphCache {
   /** Running triangle count across cached glyphs, used to assign
    *  `triFirst` per glyph for the packed triangle buffer. */
   private triRunning = 0;
-  /** Running per-band-triangle ID, cache-global. Stuffed into
-   *  vertex slot[10] so the SDF debug shader can colour each band
-   *  triangle independently — surrogate for an unsupported
-   *  `gl_PrimitiveID` / `@builtin(primitive_index)` in the fragment
-   *  stage. */
+  /** Running per-band-triangle ID, cache-global. Stuffed into vertex
+   *  slot[2] (klm.x — unused by band tris) so the SDF FS can (a) index
+   *  the per-triangle candidate CSR below and (b) colour each band
+   *  triangle in debug mode (surrogate for an unsupported
+   *  `@builtin(primitive_index)` in the fragment stage). */
   private bandTriIdNext = 0;
+  /** CSR candidate storage for band triangles. `bandCandOff[triId]`..
+   *  `bandCandOff[triId+1]` is the slice of `bandCandIdx` holding this
+   *  band triangle's candidate curve-triangle SSBO indices (global).
+   *  Replaces the old per-vertex cand slots — variable count, no cap,
+   *  stored once per triangle instead of per (3×) vertex. */
+  private readonly bandCandIdx: number[] = [];
+  private readonly bandCandOff: number[] = [0];
 
   constructor(readonly font: Font) {}
 
@@ -165,6 +174,18 @@ export class GlyphCache {
    *  per glyph as `indexBuffer()`; the per-glyph slice is described by
    *  `record.sdfFirstIndex` / `sdfIndexCount`. */
   sdfIndexBuffer(): Uint32Array { return new Uint32Array(this.sdfIndicesArr); }
+
+  /** CSR offsets for band-triangle candidates, indexed by `triId`
+   *  (vertex slot[2]). `[off[triId], off[triId+1])` is the range in
+   *  `bandCandIndexBuffer()`. Length = (band-triangle count) + 1. */
+  bandCandOffsetBuffer(): Uint32Array { return new Uint32Array(this.bandCandOff); }
+  /** Flat global curve-triangle SSBO indices for band candidates,
+   *  sliced per band triangle by `bandCandOffsetBuffer()`. Never
+   *  zero-length (WebGPU storage buffers must be ≥1 element) — a glyph
+   *  set whose band tris carry no candidates returns a 1-element pad. */
+  bandCandIndexBuffer(): Uint32Array {
+    return new Uint32Array(this.bandCandIdx.length > 0 ? this.bandCandIdx : [0]);
+  }
 
   /** Snapshot of the SDF segment buffer for the alpha-blending path.
    *  Layout: `SDF_FLOATS_PER_SEGMENT` floats per segment, indexed by
@@ -402,28 +423,23 @@ export class GlyphCache {
     const ssboCurveBase = triFirst + flatTriCount;
     let nextVi = bufs.vertices.length / GLYPH_FLOATS_PER_VERTEX;
     for (const bt of bandTris) {
-      // Real per-tri candidate SSBO indices (band-builder's pass-1+2).
-      // -1 = unused. The FS counts non-(-1) entries to derive a
-      // candidate-count for the debug-mode colour ramp, so no
-      // separate vertex slot is needed for the visualisation.
-      const c0 = bt.candidates[0] >= 0 ? ssboCurveBase + bt.candidates[0] : -1;
-      const c1 = bt.candidates[1] >= 0 ? ssboCurveBase + bt.candidates[1] : -1;
-      const c2 = bt.candidates[2] >= 0 ? ssboCurveBase + bt.candidates[2] : -1;
-      const c3 = bt.candidates[3] >= 0 ? ssboCurveBase + bt.candidates[3] : -1;
-      const c4 = bt.candidates[4] >= 0 ? ssboCurveBase + bt.candidates[4] : -1;
-      const c5 = bt.candidates[5] >= 0 ? ssboCurveBase + bt.candidates[5] : -1;
-      // Running per-band-triangle ID (cache-global). Stuffed into
-      // klm.x — unused for kind=4 (no Loop-Blinn lens for band tris).
-      // Same value on all 3 verts → flat across the tri.
+      // Running per-band-triangle ID (cache-global) — must stay in sync
+      // with bandCandOff (CSR index = triId). Stuffed into klm.x
+      // (slot 2; unused by band tris). Same value on all 3 verts.
       const triId = this.bandTriIdNext++;
+      // Append this triangle's candidate curve SSBO indices (rebased
+      // local→global) to the CSR, then record the end offset.
+      for (const ci of bt.candidates) {
+        if (ci >= 0) this.bandCandIdx.push(ssboCurveBase + ci);
+      }
+      this.bandCandOff.push(this.bandCandIdx.length); // bandCandOff[triId+1]
       for (let k = 0; k < 3; k++) {
         const p = bt.vertices[k]!;
         this.vertices.push(
           p.x, p.y,
           triId, 0, 0,             // slot[2]=triId (klm.x), [3..4]=0
           VERTEX_KIND_BAND,
-          c0, c1, c2, c3,          // slots[6..9] = first 4 candidates
-          c4, c5,                  // slots[10..11] = candidates 5/6
+          -1, -1, -1,              // slots[6..8] = lens cands (unused for band)
         );
         this.sdfIndicesArr.push(nextVi);
         nextVi++;
@@ -440,14 +456,44 @@ export class GlyphCache {
     // handles the AA boundary.
     const flatRange = bufs.interiorRange;
     const curveRange = bufs.curveRange;
-    for (let i = 0; i < flatRange.indexCount; i++) {
-      this.sdfIndicesArr.push(bufs.indices[flatRange.firstIndex + i]!);
+    // Interior triangles are handled exactly like band triangles: each
+    // near-boundary ("shell") triangle gets the contour segments within
+    // halo as candidates (its own exterior edges, its neighbours', and
+    // the opposite wall on thin stems — all via curvesWithinDist), and
+    // the FS computes the real min distance and ramps the INSIDE half of
+    // the symmetric AA (sign +1). Triangles with no candidate curve in
+    // range are "deep" — they reuse the shared flat verts (kind 0, solid
+    // α=1) and pay nothing. No subdivision needed.
+    const FILL_RADIUS = BAND_HALO_EM * 1.0625;
+    for (let t = 0; t < flatTriCount; t++) {
+      const tv = tri.flat[t]!.vertices;
+      const cands = curvesWithinDist([tv[0]!, tv[1]!, tv[2]!], tri.curves, FILL_RADIUS);
+      if (cands.length === 0) {
+        this.sdfIndicesArr.push(bufs.indices[flatRange.firstIndex + t * 3 + 0]!);
+        this.sdfIndicesArr.push(bufs.indices[flatRange.firstIndex + t * 3 + 1]!);
+        this.sdfIndicesArr.push(bufs.indices[flatRange.firstIndex + t * 3 + 2]!);
+        continue;
+      }
+      const triId = this.bandTriIdNext++;
+      for (const ci of cands) this.bandCandIdx.push(ssboCurveBase + ci);
+      this.bandCandOff.push(this.bandCandIdx.length);
+      for (let k = 0; k < 3; k++) {
+        const p = tv[k]!;
+        this.vertices.push(
+          p.x, p.y,
+          triId, 0, 0,             // slot[2]=triId (klm.x), [3..4]=0
+          VERTEX_KIND_FILL_RAMP,
+          -1, -1, -1,              // slots[6..8] = lens cands (unused here)
+        );
+        this.sdfIndicesArr.push(nextVi);
+        nextVi++;
+      }
     }
     for (let i = 0; i < curveRange.indexCount; i++) {
       this.sdfIndicesArr.push(bufs.indices[curveRange.firstIndex + i]!);
     }
     const sdfIndexCount =
-      bandTriCount * 3 + flatRange.indexCount + curveRange.indexCount;
+      bandTriCount * 3 + flatTriCount * 3 + curveRange.indexCount;
 
     const vertexCount = nextVi;
 
