@@ -2,7 +2,8 @@
 
 A TypeScript port of `Aardvark.Base.Math` and `Aardvark.Base.Geometry`
 — the primitive math types every renderer / CAD pipeline / point-cloud
-tool ends up needing. Published as `@aardworx/wombat.base`.
+tool ends up needing. Published as `@aardworx/wombat.base`
+(current release `0.4.4`).
 
 This is a foundation library: pure data types and pure functions. No
 DOM, no WebGL, no adaptive, no JSX. Other packages
@@ -45,33 +46,35 @@ In scope:
   straight to WebGL/WebGPU as VBO data without re-packing. Same
   layout as `Aardvark.Base.V3fArray` etc.
 - Standard linear algebra: matrix multiply, transpose, inverse,
-  determinant; SVD, QR, LU; symmetric eigen-decomposition.
+  determinant; LU, QR, Cholesky, SVD; symmetric eigen-decomposition.
 - Geometry primitives: `Box2*`/`Box3*`, `Range1*`, `Plane3d`,
-  `Ray3d`, `Line3d`, `Triangle3d`, `Sphere3d`, `Polygon2d`/`3d`.
+  `Ray3d`, `Line3d`, `Triangle3d`, `Sphere3d`, `Polygon2d`/`3d`,
+  plus circles, cones, cylinders and quads.
+- Ray/shape intersections and a BVH (`src/geometry/bvh.ts`).
+- A font/path polygon triangulator (`src/geometry/path/`) with
+  font + SVG subpath support.
 - Quaternion utilities, rotation conversions, spherical interpolation.
 - Hashing + structural equality for use as `HashMap` keys (compatible
   with `@aardworx/wombat.adaptive`'s `defaultHash`/`defaultEquals`).
 - Deterministic PRNGs and random-vector helpers (XoroShiro128+).
 
-Out of scope, at least for v0.1:
+Out of scope (not present today):
 
 - 64-bit integer vector / matrix types (`V2l`, `M44l`). JS `BigInt`
   is slow and the use cases on the Web are thin. Document as future
   work.
 - 16-bit-half-precision types. WebGL / WebGPU expose them, but
   TypeScript cannot represent them outside a `Uint16Array` payload.
-- Full computational geometry: convex hull algorithms, mesh
-  decimation, polygon triangulation, BVH builders. These belong in a
-  separate `aardvark-geometry` package later.
-- Spatial indices (KD-tree, octree). Same reason.
-- Color-space conversions beyond linear↔sRGB. Live in a future
-  `aardvark-color` package.
+- Heavier computational geometry: convex hull algorithms, mesh
+  decimation, general (non-path) polygon triangulation.
+- Spatial indices (KD-tree, octree).
+- Color types and color-space conversions.
 - File I/O, serialization formats, scientific-notation parsers,
   string utilities. None of this is the math layer's job.
 
 ## Operator overloading
 
-`@aardworx/aardvark-operators` is wired into the build (via `ts-patch`
+`@boperators/plugin-tsc` is wired into the build (via `ts-patch`
 + `tspc`) and into vitest (via a small inline Vite plugin in
 `vitest.config.ts`). Every numeric primitive declares a static
 `__aardworxMathBrand` so the plugin recognises it. Source code can
@@ -90,8 +93,8 @@ language-service plugin:
 {
   "compilerOptions": {
     "plugins": [
-      { "transform": "@aardworx/aardvark-operators" },
-      { "name": "@aardworx/aardvark-operators/lang-service" }
+      { "transform": "@boperators/plugin-tsc", "transformProgram": true },
+      { "name": "@boperators/plugin-ts-language-server" }
     ]
   }
 }
@@ -110,7 +113,7 @@ In **Neovim** (via `nvim-lspconfig` + `tsserver`): no extra config
 needed — tsserver picks up the `plugins` from `tsconfig.json`
 automatically.
 
-### Limitations of editor support (current v0.1)
+### Limitations of editor support
 
 - Operator diagnostics are suppressed, but TS still infers the result
   of `a + b` as the inferred-error type (often `any` or the wider
@@ -125,12 +128,11 @@ automatically.
 - [`docs/SCOPE.md`](docs/SCOPE.md) — the full type taxonomy, naming
   convention, storage model, array-view design, algorithm list, and
   phased roadmap. Read this first before writing code.
-- [`docs/STORAGE.md`](docs/STORAGE.md) — concrete storage layout for
-  every primitive: which TypedArray backs each type, byte size,
-  alignment, and the V8/SpiderMonkey performance notes that drove the
-  choices.
+- [`TODO.md`](TODO.md) — open items and remaining work.
 
-(Both will land in subsequent commits.)
+A dedicated `docs/STORAGE.md` (per-primitive TypedArray layout, byte
+size, alignment, V8/SpiderMonkey performance notes) is planned but not
+yet written; the storage model lives in `docs/SCOPE.md` for now.
 
 ## License
 

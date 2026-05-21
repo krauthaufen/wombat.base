@@ -6,8 +6,9 @@ TypedArray-backed array views.
 
 ## Tooling
 
-- `npm test` — vitest, ~660 tests across vectors, matrices, rotations, trafos,
-  geometry. Add `*.operators.test.ts` next to the type for operator coverage.
+- `npm test` — vitest, ~900 tests under `tests/` across vectors, matrices,
+  rotations, trafos, geometry. Add `*.operators.test.ts` (mirroring the source
+  layout under `tests/`) for operator coverage.
 - `npm run typecheck` — runs `scripts/typecheck.mjs`, which applies the
   boperators ts-morph transform manually before invoking tsc. Plain `tsc`
   rejects operator overloads on math types.

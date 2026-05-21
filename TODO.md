@@ -13,13 +13,14 @@ half-precision numeric types) live in `~/claude/wombat-todo.md`.
 - **Finish docs** — `docs/STORAGE.md` (per-type backing layout) and
   `docs/GEOMETRY.md` (intersection table) were marked "next round" and never
   landed.
-- **Free-function math helpers** — curate a single set (`abs`, `sqrt`,
-  `inverseSqrt`, `pow`, trig, `min`/`max`/`clamp`/`mix`/`step`/`smoothstep`,
-  `length`/`distance`/`dot`/`cross`/`normalize`/`reflect`/`refract`) that work on
-  scalars AND V2/V3/V4 component-wise, exported from `@aardworx/wombat.base`
-  (or `/math`). Pure ergonomics — pairs with shader bodies; the shader-vite
-  plugin already recognises these names, so no plugin work. Shader-only ops
-  (`dFdx`, `texture*`, atomics) stay in `@aardworx/wombat.shader/types`.
+- **Free-function math helpers** — `src/scalar.ts` already exports a few scalar
+  free functions (`clamp`, `lerp`, `smoothstep`, `smootherstep`, `fract`,
+  `sign0`, `step`, `wrap`, `approxEqual`). Still missing: the rest of the scalar
+  set (`abs`, `sqrt`, `inverseSqrt`, `pow`, trig, `min`/`max`/`mix`), and ALL
+  vector free functions (`length`/`distance`/`dot`/`cross`/`normalize`/`reflect`/
+  `refract` exist only as methods on V2f/V3f/V4f) plus a `/math` subpath export.
+  Pure ergonomics — pairs with shader bodies; shader-vite already recognises the
+  names. Shader-only ops (`dFdx`, `texture*`, atomics) stay in wombat.shader.
 
 ## Future (deferred, no concrete need yet)
 
