@@ -59,3 +59,34 @@ describe("Trafo3d", () => {
     expect(a.getHashCode()).toBe(b.getHashCode());
   });
 });
+
+describe("perspectiveProjectionReversedRH", () => {
+  const proj = (p: Trafo3d, v: V3d): V3d => {
+    const m = p.forward;
+    const w = m.M30 * v.x + m.M31 * v.y + m.M32 * v.z + m.M33;
+    return new V3d(
+      (m.M00 * v.x + m.M01 * v.y + m.M02 * v.z + m.M03) / w,
+      (m.M10 * v.x + m.M11 * v.y + m.M12 * v.z + m.M13) / w,
+      (m.M20 * v.x + m.M21 * v.y + m.M22 * v.z + m.M23) / w,
+    );
+  };
+
+  it("infinite far: near plane -> z=1, infinity -> z=0, round-trips", () => {
+    const p = Trafo3d.perspectiveProjectionReversedRHFov(Math.PI / 2, 16 / 9, 0.5);
+    expect(proj(p, new V3d(0, 0, -0.5)).z).toBeCloseTo(1, 12);
+    expect(proj(p, new V3d(0, 0, -5e7)).z).toBeCloseTo(0, 7);
+    // forward∘backward = identity on a generic in-frustum point
+    const v = new V3d(0.3, -0.2, -123.456);
+    const ndc = proj(p, v);
+    const back = proj(Trafo3d.fromMatrices(p.backward, p.forward), ndc);
+    expect(back.x).toBeCloseTo(v.x, 9);
+    expect(back.y).toBeCloseTo(v.y, 9);
+    expect(back.z).toBeCloseTo(v.z, 6);
+  });
+
+  it("finite far: near -> 1, far -> 0", () => {
+    const p = Trafo3d.perspectiveProjectionReversedRH(-1, 1, -1, 1, 2, 200);
+    expect(proj(p, new V3d(0, 0, -2)).z).toBeCloseTo(1, 12);
+    expect(proj(p, new V3d(0, 0, -200)).z).toBeCloseTo(0, 12);
+  });
+});

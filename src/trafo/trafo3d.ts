@@ -251,6 +251,48 @@ export class Trafo3d {
   }
 
   /**
+   * REVERSED-Z right-handed perspective projection: maps eye-space depth
+   * `[-near, -far]` to NDC z `[1, 0]`. `far` may be `Infinity` (the default —
+   * the classic reverse-infinite projection). Use with `depthCompare:
+   * "greater"` and depth clear 0. Reversed-Z distributes f32 depth precision
+   * near-uniformly in view space, eliminating far-field z-fighting.
+   */
+  static perspectiveProjectionReversedRH(
+    l: number, r: number, b: number, t: number, n: number, f: number = Infinity,
+  ): Trafo3d {
+    // want z_ndc(-n) = 1, z_ndc(-f) = 0 with w = -z_e:
+    //   finite:   m22 = n/(f-n), m23 = f*n/(f-n)
+    //   infinite: m22 = 0,       m23 = n
+    let m22: number, m23: number;
+    if (!Number.isFinite(f)) {
+      m22 = 0; m23 = n;
+    } else {
+      m22 = n / (f - n); m23 = (f * n) / (f - n);
+    }
+    const fwd = M44d.fromArray([
+      (2 * n) / (r - l), 0, (r + l) / (r - l), 0,
+      0, (2 * n) / (t - b), (t + b) / (t - b), 0,
+      0, 0, m22, m23,
+      0, 0, -1, 0,
+    ]);
+    // exact inverse of the z/w block [[m22, m23], [-1, 0]] (det = m23):
+    const bwd = M44d.fromArray([
+      (r - l) / (2 * n), 0, 0, (r + l) / (2 * n),
+      0, (t - b) / (2 * n), 0, (t + b) / (2 * n),
+      0, 0, 0, -1,
+      0, 0, 1 / m23, m22 / m23,
+    ]);
+    return Trafo3d.fromMatrices(fwd, bwd);
+  }
+
+  /** Reversed-Z right-handed perspective from horizontal FoV (radians). */
+  static perspectiveProjectionReversedRHFov(horizontalFovRad: number, aspect: number, n: number, f: number = Infinity): Trafo3d {
+    const r = Math.tan(horizontalFovRad / 2) * n;
+    const t = r / aspect;
+    return Trafo3d.perspectiveProjectionReversedRH(-r, r, -t, t, n, f);
+  }
+
+  /**
    * OpenGL-convention perspective projection (NDC z in `[-1, 1]`).
    */
   static perspectiveProjectionGL(
