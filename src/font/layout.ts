@@ -16,9 +16,13 @@
 //     runs once that lands.
 //   - Bidi reordering (RTL embedding): the layout function preserves
 //     codepoint order; callers that need RTL reorder upstream.
-//   - Multi-line wrapping / break-finding: the layout function lays
-//     out a single line; word-break / line-break logic belongs in a
-//     higher-level wrapper.
+//   - Multi-line WRAPPING / break-finding: no automatic wrapping;
+//     word-break logic belongs in a higher-level wrapper. EXPLICIT
+//     newlines ('\n') are supported: each line restarts the pen at
+//     its own x, lines advance downward by 1.2 em, every line is
+//     centered on the common block axis and the block is vertically
+//     centered on the layout origin — so a downstream consumer that
+//     centers by `advance` (the widest line) centers the whole block.
 
 import type { Font } from "./font.js";
 import { V2d } from "../vector/v2d.js";
@@ -68,36 +72,57 @@ export function layoutText(
   font: Font, text: string, options: LayoutOptions = {},
 ): LayoutResult {
   const useKerning = options.kerning ?? true;
-  const codepoints = decodeCodepoints(text);
+  const lineHeight = (font.unitsPerEm || 1000) * 1.2;
+  const lines = text.split("\n");
+  interface Pending { glyph: ShapedGlyph; line: number }
+  const pending: Pending[] = [];
+  const lineAdvance: number[] = [];
+  for (let li = 0; li < lines.length; li++) {
+    const codepoints = decodeCodepoints(lines[li]!);
+    let pen = 0;
+    let prevGlyph: ReturnType<Font["raw"]["charToGlyph"]> | undefined;
+    for (const cp of codepoints) {
+      const ch = String.fromCodePoint(cp);
+      const otGlyph = font.raw.charToGlyph(ch);
+      if (useKerning && prevGlyph) {
+        pen += font.raw.getKerningValue(prevGlyph, otGlyph);
+      }
+      const advance = otGlyph.advanceWidth ?? 0;
+      pending.push({
+        glyph: {
+          codepoint: cp,
+          char: ch,
+          glyphIndex: otGlyph.index,
+          x: pen,
+          y: 0,
+          advance,
+        },
+        line: li,
+      });
+      pen += advance;
+      prevGlyph = otGlyph;
+    }
+    lineAdvance.push(pen);
+  }
+  const maxAdvance = lineAdvance.reduce((a, b) => Math.max(a, b), 0);
+  // per-line horizontal centering on the block axis + vertical block
+  // centering; single-line text keeps the historical (0,0) frame.
   const glyphs: ShapedGlyph[] = [];
   let bounds = Box2d.empty;
-  let pen = 0;
-  let prevGlyph: ReturnType<Font["raw"]["charToGlyph"]> | undefined;
-  for (const cp of codepoints) {
-    const ch = String.fromCodePoint(cp);
-    const otGlyph = font.raw.charToGlyph(ch);
-    if (useKerning && prevGlyph) {
-      pen += font.raw.getKerningValue(prevGlyph, otGlyph);
-    }
-    const advance = otGlyph.advanceWidth ?? 0;
-    glyphs.push({
-      codepoint: cp,
-      char: ch,
-      glyphIndex: otGlyph.index,
-      x: pen,
-      y: 0,
-      advance,
-    });
-    // Glyph bbox + pen offset → contributes to layout bounds.
+  const yTop = ((lines.length - 1) * lineHeight) / 2;
+  for (const p of pending) {
+    const xShift = lines.length > 1 ? (maxAdvance - lineAdvance[p.line]!) / 2 : 0;
+    const y = lines.length > 1 ? yTop - p.line * lineHeight : 0;
+    const g: ShapedGlyph = { ...p.glyph, x: p.glyph.x + xShift, y };
+    glyphs.push(g);
+    const otGlyph = font.raw.charToGlyph(g.char);
     const bb = otGlyph.getBoundingBox();
     if (Number.isFinite(bb.x1) && Number.isFinite(bb.x2)) {
-      bounds = bounds.extend(new V2d(pen + bb.x1, bb.y1));
-      bounds = bounds.extend(new V2d(pen + bb.x2, bb.y2));
+      bounds = bounds.extend(new V2d(g.x + bb.x1, y + bb.y1));
+      bounds = bounds.extend(new V2d(g.x + bb.x2, y + bb.y2));
     }
-    pen += advance;
-    prevGlyph = otGlyph;
   }
-  return { glyphs, advance: pen, bounds };
+  return { glyphs, advance: maxAdvance, bounds };
 }
 
 /**
