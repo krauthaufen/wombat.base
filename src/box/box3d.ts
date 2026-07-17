@@ -15,13 +15,13 @@ const BYTES = COMPONENT_COUNT * F64_BYTES;
 
 export class Box3d {
   /** @internal */
-  readonly _data: Float64Array;
+  readonly _data: number[];
 
   constructor(
     minX: number = 0, minY: number = 0, minZ: number = 0,
     maxX: number = 0, maxY: number = 0, maxZ: number = 0,
   ) {
-    this._data = new Float64Array(6);
+    this._data = new Array<number>(6).fill(0);
     this._data[0] = minX;
     this._data[1] = minY;
     this._data[2] = minZ;
@@ -31,8 +31,8 @@ export class Box3d {
   }
 
   static viewOnto(buffer: ArrayBufferLike, byteOffset: number): Box3d {
-    const b = Object.create(Box3d.prototype) as { _data: Float64Array };
-    b._data = new Float64Array(buffer, byteOffset, COMPONENT_COUNT);
+    const b = Object.create(Box3d.prototype) as { _data: number[] };
+    b._data = Array.from(new Float64Array(buffer, byteOffset, COMPONENT_COUNT));
     return b as Box3d;
   }
 

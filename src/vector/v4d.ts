@@ -15,10 +15,10 @@ export class V4d {
   static readonly __aardworxMathBrand: "V4d" = "V4d";
 
   /** @internal */
-  readonly _data: Float64Array;
+  readonly _data: number[];
 
   constructor(x: number = 0, y: number = 0, z: number = 0, w: number = 0) {
-    this._data = new Float64Array(4);
+    this._data = new Array<number>(4).fill(0);
     this._data[0] = x;
     this._data[1] = y;
     this._data[2] = z;
@@ -26,8 +26,8 @@ export class V4d {
   }
 
   static viewOnto(buffer: ArrayBufferLike, byteOffset: number): V4d {
-    const v = Object.create(V4d.prototype) as { _data: Float64Array };
-    v._data = new Float64Array(buffer, byteOffset, COMPONENT_COUNT);
+    const v = Object.create(V4d.prototype) as { _data: number[] };
+    v._data = Array.from(new Float64Array(buffer, byteOffset, COMPONENT_COUNT));
     return v as V4d;
   }
 

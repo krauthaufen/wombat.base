@@ -54,10 +54,10 @@ export class Rot3d {
   static readonly __aardworxMathBrand: "Rot3d" = "Rot3d";
 
   /** @internal storage = [W, X, Y, Z] */
-  readonly _data: Float64Array;
+  readonly _data: number[];
 
   constructor(w: number = 1, x: number = 0, y: number = 0, z: number = 0) {
-    this._data = new Float64Array(4);
+    this._data = new Array<number>(4).fill(0);
     this._data[0] = w;
     this._data[1] = x;
     this._data[2] = y;
@@ -65,8 +65,8 @@ export class Rot3d {
   }
 
   static viewOnto(buffer: ArrayBufferLike, byteOffset: number): Rot3d {
-    const r = Object.create(Rot3d.prototype) as { _data: Float64Array };
-    r._data = new Float64Array(buffer, byteOffset, COMPONENT_COUNT);
+    const r = Object.create(Rot3d.prototype) as { _data: number[] };
+    r._data = Array.from(new Float64Array(buffer, byteOffset, COMPONENT_COUNT));
     return r as Rot3d;
   }
 

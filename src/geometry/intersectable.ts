@@ -321,7 +321,7 @@ class TransformedIntersectable implements IIntersectable {
  * Computes Mᵀ · v (treating v as a direction; ignores translation).
  * Used to apply (M⁻¹)ᵀ to a normal when M⁻¹ is available as `backward`.
  */
-function transposedTransformDir(m: { _data: Float64Array }, v: V3d): V3d {
+function transposedTransformDir(m: { _data: number[] }, v: V3d): V3d {
   const a = m._data;
   const x = v.x, y = v.y, z = v.z;
   // Row-major M44d: index [row*4+col]. Transpose swaps row/col, so

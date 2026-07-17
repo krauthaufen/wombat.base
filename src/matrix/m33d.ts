@@ -14,15 +14,15 @@ export class M33d {
   static readonly __aardworxMathBrand: "M33d" = "M33d";
 
   /** @internal */
-  readonly _data: Float64Array;
+  readonly _data: number[];
 
   constructor() {
-    this._data = new Float64Array(COMPONENT_COUNT);
+    this._data = new Array<number>(COMPONENT_COUNT).fill(0);
   }
 
   static viewOnto(buffer: ArrayBufferLike, byteOffset: number): M33d {
-    const m = Object.create(M33d.prototype) as { _data: Float64Array };
-    m._data = new Float64Array(buffer, byteOffset, COMPONENT_COUNT);
+    const m = Object.create(M33d.prototype) as { _data: number[] };
+    m._data = Array.from(new Float64Array(buffer, byteOffset, COMPONENT_COUNT));
     return m as M33d;
   }
 
@@ -77,7 +77,7 @@ export class M33d {
 
   static copy(other: M33d): M33d {
     const m = new M33d();
-    m._data.set(other._data);
+    for (let _i = 0; _i < other._data.length; _i++) m._data[_i] = other._data[_i]!;
     return m;
   }
 
@@ -341,19 +341,19 @@ export class M33d {
     }
     const t = target as M33d;
     const ad = a._data, bd = b._data;
-    const tmp = new Float64Array(COMPONENT_COUNT);
+    const tmp = new Array<number>(COMPONENT_COUNT).fill(0);
     for (let row = 0; row < 3; row++) {
       const a0 = ad[row * 3 + 0]!, a1 = ad[row * 3 + 1]!, a2 = ad[row * 3 + 2]!;
       tmp[row * 3 + 0] = a0 * bd[0]! + a1 * bd[3]! + a2 * bd[6]!;
       tmp[row * 3 + 1] = a0 * bd[1]! + a1 * bd[4]! + a2 * bd[7]!;
       tmp[row * 3 + 2] = a0 * bd[2]! + a1 * bd[5]! + a2 * bd[8]!;
     }
-    t._data.set(tmp);
+    for (let _i = 0; _i < tmp.length; _i++) t._data[_i] = tmp[_i]!;
     return t;
   }
 
   static copyInto(from: M33d, target: M33d): M33d {
-    target._data.set(from._data);
+    for (let _i = 0; _i < from._data.length; _i++) target._data[_i] = from._data[_i]!;
     return target;
   }
 

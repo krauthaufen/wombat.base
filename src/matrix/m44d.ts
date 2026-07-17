@@ -22,15 +22,15 @@ export class M44d {
   static readonly __aardworxMathBrand: "M44d" = "M44d";
 
   /** @internal */
-  readonly _data: Float64Array;
+  readonly _data: number[];
 
   constructor() {
-    this._data = new Float64Array(COMPONENT_COUNT);
+    this._data = new Array<number>(COMPONENT_COUNT).fill(0);
   }
 
   static viewOnto(buffer: ArrayBufferLike, byteOffset: number): M44d {
-    const m = Object.create(M44d.prototype) as { _data: Float64Array };
-    m._data = new Float64Array(buffer, byteOffset, COMPONENT_COUNT);
+    const m = Object.create(M44d.prototype) as { _data: number[] };
+    m._data = Array.from(new Float64Array(buffer, byteOffset, COMPONENT_COUNT));
     return m as M44d;
   }
 
@@ -90,7 +90,7 @@ export class M44d {
 
   static copy(other: M44d): M44d {
     const m = new M44d();
-    m._data.set(other._data);
+    for (let _i = 0; _i < other._data.length; _i++) m._data[_i] = other._data[_i]!;
     return m;
   }
 
@@ -581,7 +581,7 @@ export class M44d {
     }
     const t = target as M44d;
     const ad = a._data, bd = b._data;
-    const tmp = new Float64Array(COMPONENT_COUNT);
+    const tmp = new Array<number>(COMPONENT_COUNT).fill(0);
     for (let row = 0; row < 4; row++) {
       const a0 = ad[row * 4 + 0]!, a1 = ad[row * 4 + 1]!, a2 = ad[row * 4 + 2]!, a3 = ad[row * 4 + 3]!;
       tmp[row * 4 + 0] = a0 * bd[0]! + a1 * bd[4]! + a2 * bd[8]!  + a3 * bd[12]!;
@@ -589,12 +589,12 @@ export class M44d {
       tmp[row * 4 + 2] = a0 * bd[2]! + a1 * bd[6]! + a2 * bd[10]! + a3 * bd[14]!;
       tmp[row * 4 + 3] = a0 * bd[3]! + a1 * bd[7]! + a2 * bd[11]! + a3 * bd[15]!;
     }
-    t._data.set(tmp);
+    for (let _i = 0; _i < tmp.length; _i++) t._data[_i] = tmp[_i]!;
     return t;
   }
 
   static copyInto(from: M44d, target: M44d): M44d {
-    target._data.set(from._data);
+    for (let _i = 0; _i < from._data.length; _i++) target._data[_i] = from._data[_i]!;
     return target;
   }
 

@@ -30,10 +30,10 @@ export class V3d {
    * `V3dArray.viewAt`).
    * @internal
    */
-  readonly _data: Float64Array;
+  readonly _data: number[];
 
   constructor(x: number = 0, y: number = 0, z: number = 0) {
-    this._data = new Float64Array(3);
+    this._data = new Array<number>(3).fill(0);
     this._data[0] = x;
     this._data[1] = y;
     this._data[2] = z;
@@ -45,8 +45,8 @@ export class V3d {
    * internally by V3dArray; rarely needed by users.
    */
   static viewOnto(buffer: ArrayBufferLike, byteOffset: number): V3d {
-    const v = Object.create(V3d.prototype) as { _data: Float64Array };
-    v._data = new Float64Array(buffer, byteOffset, COMPONENT_COUNT);
+    const v = Object.create(V3d.prototype) as { _data: number[] };
+    v._data = Array.from(new Float64Array(buffer, byteOffset, COMPONENT_COUNT));
     return v as V3d;
   }
 

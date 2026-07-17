@@ -16,16 +16,16 @@ export class Rot2d {
   static readonly __aardworxMathBrand: "Rot2d" = "Rot2d";
 
   /** @internal */
-  readonly _data: Float64Array;
+  readonly _data: number[];
 
   constructor(radians: number = 0) {
-    this._data = new Float64Array(1);
+    this._data = new Array<number>(1).fill(0);
     this._data[0] = radians;
   }
 
   static viewOnto(buffer: ArrayBufferLike, byteOffset: number): Rot2d {
-    const r = Object.create(Rot2d.prototype) as { _data: Float64Array };
-    r._data = new Float64Array(buffer, byteOffset, COMPONENT_COUNT);
+    const r = Object.create(Rot2d.prototype) as { _data: number[] };
+    r._data = Array.from(new Float64Array(buffer, byteOffset, COMPONENT_COUNT));
     return r as Rot2d;
   }
 

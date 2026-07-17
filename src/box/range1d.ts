@@ -11,17 +11,17 @@ const BYTES = COMPONENT_COUNT * F64_BYTES;
 
 export class Range1d {
   /** @internal */
-  readonly _data: Float64Array;
+  readonly _data: number[];
 
   constructor(min: number = 0, max: number = 0) {
-    this._data = new Float64Array(2);
+    this._data = new Array<number>(2).fill(0);
     this._data[0] = min;
     this._data[1] = max;
   }
 
   static viewOnto(buffer: ArrayBufferLike, byteOffset: number): Range1d {
-    const r = Object.create(Range1d.prototype) as { _data: Float64Array };
-    r._data = new Float64Array(buffer, byteOffset, COMPONENT_COUNT);
+    const r = Object.create(Range1d.prototype) as { _data: number[] };
+    r._data = Array.from(new Float64Array(buffer, byteOffset, COMPONENT_COUNT));
     return r as Range1d;
   }
 

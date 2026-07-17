@@ -16,15 +16,15 @@ export class M42d {
   static readonly __aardworxMathBrand: "M42d" = "M42d";
 
   /** @internal */
-  readonly _data: Float64Array;
+  readonly _data: number[];
 
   constructor() {
-    this._data = new Float64Array(COMPONENT_COUNT);
+    this._data = new Array<number>(COMPONENT_COUNT).fill(0);
   }
 
   static viewOnto(buffer: ArrayBufferLike, byteOffset: number): M42d {
-    const m = Object.create(M42d.prototype) as { _data: Float64Array };
-    m._data = new Float64Array(buffer, byteOffset, COMPONENT_COUNT);
+    const m = Object.create(M42d.prototype) as { _data: number[] };
+    m._data = Array.from(new Float64Array(buffer, byteOffset, COMPONENT_COUNT));
     return m as M42d;
   }
 
@@ -62,7 +62,7 @@ export class M42d {
 
   static copy(other: M42d): M42d {
     const m = new M42d();
-    m._data.set(other._data);
+    for (let _i = 0; _i < other._data.length; _i++) m._data[_i] = other._data[_i]!;
     return m;
   }
 
@@ -218,7 +218,7 @@ export class M42d {
   }
 
   static copyInto(from: M42d, target: M42d): M42d {
-    target._data.set(from._data);
+    for (let _i = 0; _i < from._data.length; _i++) target._data[_i] = from._data[_i]!;
     return target;
   }
 
