@@ -51,10 +51,6 @@
       "types": "./dist/svg/index.d.ts",
       "import": "./dist/svg/index.js"
     },
-    "./path": {
-      "types": "./dist/geometry/path/index.d.ts",
-      "import": "./dist/geometry/path/index.js"
-    },
     "./package.json": "./package.json"
   },
   "scripts": {
