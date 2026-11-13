@@ -157,6 +157,7 @@ export {
   detectComponents,
   connectComponents,
   tessellatePath,
+  separateCurveHulls,
   type TessellationResult,
   // Stage 4–5
   type CurveTriangle,

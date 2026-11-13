@@ -18,6 +18,7 @@ import { connectComponents } from "./bridge.js";
 import { computeWindings } from "./winding.js";
 import { type FillRule, FillRules } from "./fill-rule.js";
 import { DEFAULT_EPS } from "./intersect.js";
+import { separateCurveHulls } from "./separate.js";
 
 export interface TessellationResult {
   /** Augmented planar graph with bridge edges connecting components. */
@@ -57,7 +58,8 @@ export function tessellatePath(
     }
   }
 
-  const graph0 = buildPlanarGraph(segments, eps);
+  // Loop-Blinn: curve triangles must not overlap (separate.ts)
+  const graph0 = buildPlanarGraph(separateCurveHulls(segments), eps);
   const ext0 = extractFaces(graph0);
   const dec = detectComponents(ext0, graph0);
   const graph = dec.components.length > 1

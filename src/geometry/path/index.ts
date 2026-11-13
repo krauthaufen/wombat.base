@@ -57,3 +57,4 @@ export {
   VERTEX_KIND_BAND,
   VERTEX_BYTE_SIZE,
 } from "./buffers.js";
+export { separateCurveHulls } from "./separate.js";

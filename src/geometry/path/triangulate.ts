@@ -132,6 +132,14 @@ function pointInTriangle(p: V2d, a: V2d, b: V2d, c: V2d, eps: number): boolean {
   return sign || opposite;
 }
 
+/** `p` on the boundary of the CCW triangle abc, not at a corner. */
+function onEarBoundary(p: V2d, a: V2d, b: V2d, c: V2d, eps: number): boolean {
+  const same = (q: V2d) => Math.abs(q.x - p.x) <= 1e-12 && Math.abs(q.y - p.y) <= 1e-12;
+  if (same(a) || same(b) || same(c)) return false;
+  const s1 = signedArea2(a, b, p), s2 = signedArea2(b, c, p), s3 = signedArea2(c, a, p);
+  return s1 >= -eps && s2 >= -eps && s3 >= -eps;
+}
+
 /**
  * Strict segment-segment crossing test (excluding shared-endpoint
  * touches). True iff segments (p0, p1) and (q0, q1) properly cross
@@ -156,10 +164,15 @@ function isEar(node: EarNode, eps: number): boolean {
   const a = node.prev.p, b = node.p, c = node.next.p;
   // Convex (CCW) test: signed area must be strictly positive.
   if (signedArea2(a, b, c) <= eps) return false;
-  // No other (non-adjacent) vertex strictly inside the triangle abc.
+  // No other (non-adjacent) vertex inside the triangle abc — nor on its
+  // boundary, unless it IS one of its corners (a repeated vertex, as at a
+  // slit): a vertex on the diagonal a–c means the polygon turns there, and
+  // the ear would cover the region beyond it (a curve's detour vertex,
+  // halved onto a line through two others, let an interior triangle cover
+  // what its curve triangle cut away).
   let n = node.next.next;
   while (n !== node.prev) {
-    if (pointInTriangle(n.p, a, b, c, eps)) return false;
+    if (pointInTriangle(n.p, a, b, c, eps) || onEarBoundary(n.p, a, b, c, eps)) return false;
     n = n.next;
   }
   // The diagonal (a, c) must not cross any non-adjacent polygon
