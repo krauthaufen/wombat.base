@@ -120,3 +120,23 @@ describe("static I/O constants (1=I, 0=O bit-pattern combinations)", () => {
     expect(V4f.IIOI.x).toBe(1); expect(V4f.IIOI.y).toBe(1); expect(V4f.IIOI.z).toBe(0); expect(V4f.IIOI.w).toBe(1);
   });
 });
+
+describe("swizzles on the double, int and uint families", () => {
+  it("give vectors of their own family", async () => {
+    const { V2d, V3d, V4d, V2i, V3i, V3ui, V2ui } = await import("../../src/index.js");
+    const d = new V3d(1.5, 2.5, 3.5) as any;
+    expect(d.xy).toBeInstanceOf(V2d);
+    expect([d.xy.x, d.xy.y]).toEqual([1.5, 2.5]);
+    expect([d.zyx.x, d.zyx.y, d.zyx.z]).toEqual([3.5, 2.5, 1.5]);
+    // Double precision is kept: a float family swizzle would round.
+    expect((new V3d(0.1, 0.2, 0.3) as any).xy.x).toBe(0.1);
+    expect((new V4d(1, 2, 3, 4) as any).xyz).toBeInstanceOf(V3d);
+    const i = new V3i(1, 2, 3) as any;
+    expect(i.xy).toBeInstanceOf(V2i);
+    expect([i.yz.x, i.yz.y]).toEqual([2, 3]);
+    expect((new V3ui(1, 2, 3) as any).xy).toBeInstanceOf(V2ui);
+    expect((new V2d(1, 2) as any).yx.x).toBe(2);
+    expect((new V2i(1, 2) as any).xyz).toBeUndefined();
+    void V3i;
+  });
+});
