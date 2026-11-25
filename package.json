@@ -24,7 +24,8 @@
   ],
   "type": "module",
   "sideEffects": [
-    "./dist/numberMethods.js"
+    "./dist/numberMethods.js",
+    "./dist/vector/install-swizzles.js"
   ],
   "engines": {
     "node": ">=18"
