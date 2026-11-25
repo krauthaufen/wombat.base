@@ -24,6 +24,7 @@
   ],
   "type": "module",
   "sideEffects": [
+    "./dist/index.js",
     "./dist/numberMethods.js",
     "./dist/vector/install-swizzles.js"
   ],
